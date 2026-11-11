@@ -11,7 +11,8 @@ import {
   User as UserIcon, 
   CheckCircle2,
   Trash2,
-  AlertCircle
+  AlertCircle,
+  X
 } from 'lucide-react';
 import { GlobalNavbar } from '../../components/navigation/GlobalNavbar';
 import { BackToTop } from '../../components/navigation/BackToTop';
@@ -704,4 +705,3 @@ export const ProjectDetailsPage: React.FC = () => {
     </div>
   );
 };
-

@@ -156,6 +156,22 @@ export const api = {
     return handleResponse<ProjectItem>(res);
   },
 
+  async addEmployeeToProject(projectId: number, userId: number) {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/employees/${userId}`, {
+      method: 'POST',
+      headers: { ...getAuthHeader() },
+    });
+    return handleResponse<ProjectItem>(res);
+  },
+
+  async removeEmployeeFromProject(projectId: number, userId: number) {
+    const res = await fetch(`${API_BASE}/projects/${projectId}/employees/${userId}`, {
+      method: 'DELETE',
+      headers: { ...getAuthHeader() },
+    });
+    return handleResponse<{ message: string; project: ProjectItem }>(res);
+  },
+
   async createProject(data: any) {
     const res = await fetch(`${API_BASE}/projects`, {
       method: 'POST',
@@ -545,4 +561,3 @@ export const api = {
     return handleResponse<NotificationItem>(res);
   },
 };
-
