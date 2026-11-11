@@ -109,13 +109,13 @@ npm run dev         # Launches Vite on http://localhost:5173
 
 ## 🔑 Pre-Seeded Test Credentials
 
-| Role | Username | Password | Notes |
+| Role | Username | Notes |
 |---|---|---|---|
-| **Developer** | `developer` | `dev123` | Full admin, UI editor, 24h undo |
-| **Director** | `director` | `dir123` | Cross-company oversight, public sharing |
-| **Project Manager**| `pm` | `pm123` | Oversight, **deletion prohibited** |
-| **Manager** | `manager` | `mgr123` | Assigned to *AVD Tech Systems* only |
-| **Employee** | `employee` | `emp123` | Assigned work, notes, updates |
+| **Developer** | `developer`| Full admin, UI editor, 24h undo |
+| **Director** | `director`| Cross-company oversight, public sharing |
+| **Project Manager**| `pm`| Oversight, **deletion prohibited** |
+| **Manager** | `manager`| Assigned to *AVD Tech Systems* only |
+| **Employee** | `employee`| Assigned work, notes, updates |
 
 ---
 
