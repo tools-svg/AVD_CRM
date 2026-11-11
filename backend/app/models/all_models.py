@@ -363,7 +363,7 @@ class UserSession(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     username = Column(String(50), nullable=False, index=True)
     role_name = Column(String(50), nullable=False)
-    ip_address = Column(String(50), nullable=True)
+    ip_address = Column(Text, nullable=True)
     user_agent = Column(String(255), nullable=True)
     login_time = Column(DateTime, default=datetime.datetime.utcnow, nullable=False, index=True)
     last_heartbeat = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
