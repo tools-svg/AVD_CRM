@@ -110,7 +110,7 @@ npm run dev         # Launches Vite on http://localhost:5173
 ## 🔑 Pre-Seeded Test Credentials
 
 | Role | Username | Notes |
-|---|---|---|---|
+|---|---|---|
 | **Developer** | `developer`| Full admin, UI editor, 24h undo |
 | **Director** | `director`| Cross-company oversight, public sharing |
 | **Project Manager**| `pm`| Oversight, **deletion prohibited** |
