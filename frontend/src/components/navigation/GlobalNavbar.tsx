@@ -45,7 +45,7 @@ export const GlobalNavbar: React.FC = () => {
   const location = useLocation();
   const { user, logout } = useAuth();
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
-  const { customizationRole, setCustomizationRole, setIsEditorOpen, isDirectEditingMode, setIsDirectEditingMode } = useUIConfig();
+  const { uiConfig, customizationRole, setCustomizationRole, setIsEditorOpen, isDirectEditingMode, setIsDirectEditingMode } = useUIConfig();
 
   const [activeSlide, setActiveSlide] = useState(0);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -168,24 +168,41 @@ export const GlobalNavbar: React.FC = () => {
   return (
     <header className="sticky top-0 z-40 bg-[#FFFFFF] border-b border-[#E1DCDC] shadow-xs px-4 sm:px-6 py-2.5 flex items-center justify-between">
       {/* Left: Logo Slideshow (Section 2.1: 2% border-radius on container, Section 12: Global Back Navigation) */}
-      <div className="flex items-center space-x-6">
-        <div 
-          onClick={handleLogoClick}
-          className="relative w-36 h-10 cursor-pointer flex items-center overflow-hidden select-none group hover:opacity-90 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
-          style={{ borderRadius: '2%' }}
-          title={location.pathname === '/home' || location.pathname === '/' ? 'AVD Platform (Home)' : 'Back to previous page'}
-        >
-          {LOGO_SLIDES.map((src, idx) => (
-            <img
-              key={src}
-              src={src}
-              alt={`AVD Logo variation ${idx + 1}`}
-              className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-700 ease-in-out ${
-                idx === activeSlide ? 'opacity-100' : 'opacity-0 pointer-events-none'
-              }`}
-            />
-          ))}
-        </div>
+      <div className="flex items-center space-x-4 sm:space-x-6">
+        {uiConfig.navbar?.showSlideshow !== false ? (
+          <div 
+            onClick={handleLogoClick}
+            className="relative w-36 h-10 cursor-pointer flex items-center overflow-hidden select-none group hover:opacity-90 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
+            style={{ borderRadius: uiConfig.global_theme?.logoBorderRadius || '2%' }}
+            title={location.pathname === '/home' || location.pathname === '/' ? 'AVD Platform (Home)' : 'Back to previous page'}
+          >
+            {LOGO_SLIDES.map((src, idx) => (
+              <img
+                key={src}
+                src={src}
+                alt={`AVD Logo variation ${idx + 1}`}
+                className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-700 ease-in-out ${
+                  idx === activeSlide ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                }`}
+              />
+            ))}
+          </div>
+        ) : (
+          <div 
+            onClick={handleLogoClick}
+            className="h-10 cursor-pointer flex items-center select-none"
+            style={{ borderRadius: uiConfig.global_theme?.logoBorderRadius || '2%' }}
+            title="AVD Platform (Home)"
+          >
+            <img src="/logos/1.png" alt="AVD Logo" className="h-8 object-contain" />
+          </div>
+        )}
+
+        {uiConfig.navbar?.titleText && (
+          <span className="text-xs font-bold text-[#0A0A0A] hidden xl:inline-block tracking-tight bg-[#F5F3F4] px-2.5 py-1 rounded-[6px] border border-[#E1DCDC]">
+            {uiConfig.navbar.titleText}
+          </span>
+        )}
 
         {/* Global Search Bar (Section 9: Live Database Search with Debounce) */}
         <div ref={searchRef} className="relative hidden md:block w-72 lg:w-80">
@@ -200,7 +217,7 @@ export const GlobalNavbar: React.FC = () => {
                   setShowSearchDropdown(true);
                 }
               }}
-              placeholder="Search projects, modules, employees..."
+              placeholder={uiConfig.navbar?.searchPlaceholder || 'Search projects, modules, employees...'}
               className="bg-transparent border-none outline-none text-[#333333] placeholder-[#888888] text-xs w-full font-medium"
             />
             {isSearching && (

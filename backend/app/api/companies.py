@@ -60,7 +60,10 @@ def create_company(
     existing = db.query(Company).filter((Company.name == payload.name) | (Company.code == payload.code)).first()
     if existing:
         raise HTTPException(status_code=400, detail="Company name or code already exists")
-    company = Company(**payload.dict())
+    company_data = payload.dict()
+    if company_data.get("logo_url") and isinstance(company_data["logo_url"], str):
+        company_data["logo_url"] = company_data["logo_url"].strip() or None
+    company = Company(**company_data)
     db.add(company)
     db.commit()
     db.refresh(company)
@@ -86,7 +89,21 @@ def update_company(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
+
+    if payload.name or payload.code:
+        conflict_query = db.query(Company).filter(Company.id != company_id)
+        conditions = []
+        if payload.name:
+            conditions.append(Company.name == payload.name)
+        if payload.code:
+            conditions.append(Company.code == payload.code)
+        from sqlalchemy import or_
+        if conflict_query.filter(or_(*conditions)).first():
+            raise HTTPException(status_code=400, detail="Company name or code already exists")
+
     for key, val in payload.dict(exclude_unset=True).items():
+        if key == "logo_url" and isinstance(val, str):
+            val = val.strip() or None
         setattr(company, key, val)
     db.commit()
     db.refresh(company)

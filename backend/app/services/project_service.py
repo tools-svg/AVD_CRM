@@ -27,6 +27,15 @@ def calculate_and_update_project_progress(project_id: int, db: Session) -> float
         new_progress = round((closed_modules / total_modules) * 100, 1)
 
     project.progress = new_progress
+
+    # Automatically synchronize project status with module progress:
+    # 1. If all active modules are Closed (and there is at least one module), mark project as Closed
+    if total_modules > 0 and closed_modules == total_modules:
+        project.status = "Closed"
+    # 2. If any module is In Progress, Review, or Closed, advance project from Not Started to In Progress
+    elif project.status == "Not Started" and (new_progress > 0 or any(getattr(m, 'status', None) in ["In Progress", "Review", "Closed"] for m in active_modules)):
+        project.status = "In Progress"
+
     db.commit()
     db.refresh(project)
     return new_progress

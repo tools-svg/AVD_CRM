@@ -36,7 +36,7 @@ const PAYMENT_METHODS = [
 const STATUS_OPTIONS: PaymentStatus[] = [
   'Quoted',
   '50% Received',
-  'Partially Received',
+  '25% Received',
   'Fully Received',
   'On Hold',
   'Overdue',

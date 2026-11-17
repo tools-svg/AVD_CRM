@@ -147,10 +147,14 @@ def get_role_ui_config(
         UIConfiguration.is_active == True
     ).all()
 
-    result = dict(DEFAULT_CONFIGS)
+    result = {k: dict(v) for k, v in DEFAULT_CONFIGS.items()}
     for cfg in saved_configs:
         try:
-            result[cfg.component_key] = json.loads(cfg.config_json)
+            val = json.loads(cfg.config_json)
+            if isinstance(val, dict) and cfg.component_key in result and isinstance(result[cfg.component_key], dict):
+                result[cfg.component_key] = {**result[cfg.component_key], **val}
+            else:
+                result[cfg.component_key] = val
         except Exception:
             pass
 

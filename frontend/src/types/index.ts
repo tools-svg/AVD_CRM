@@ -254,7 +254,7 @@ export interface ElementCustomization {
 export type PaymentStatus = 
   | 'Quoted'
   | '50% Received'
-  | 'Partially Received'
+  | '25% Received'
   | 'Fully Received'
   | 'On Hold'
   | 'Overdue'

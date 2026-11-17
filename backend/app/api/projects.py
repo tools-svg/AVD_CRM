@@ -14,6 +14,7 @@ from app.models.all_models import (
     ActivityLog, 
     Update,
     ProjectEmployeeAssignment,
+    ModuleEmployeeAssignment,
     Notification
 )
 from app.schemas.schemas import ProjectOut, ProjectCreate, ProjectUpdate, ModuleOut
@@ -350,7 +351,13 @@ def update_project(
 
     role_name = current_user.role.name if current_user.role else ""
     if role_name == "Employee":
-        raise HTTPException(status_code=403, detail="Employees cannot edit project settings")
+        is_assigned = db.query(ProjectEmployeeAssignment).filter(
+            ProjectEmployeeAssignment.project_id == project.id,
+            ProjectEmployeeAssignment.user_id == current_user.id
+        ).first()
+        is_lead = project.lead_id == current_user.id
+        if not is_assigned and not is_lead:
+            raise HTTPException(status_code=403, detail="Employees cannot edit unassigned project settings")
 
     was_draft = project.is_draft
     update_data = payload.dict(exclude_unset=True)
@@ -370,6 +377,67 @@ def update_project(
             db.add(ProjectEmployeeAssignment(project_id=project.id, user_id=uid))
         if assigned_ids and not payload.lead_id:
             project.lead_id = assigned_ids[0]
+
+    # Handle modules synchronization if provided
+    modules_data = update_data.pop("modules", None)
+    if modules_data is not None:
+        existing_mods = db.query(Module).filter(Module.project_id == project.id, Module.is_deleted == False).all()
+        existing_mod_map = {m.id: m for m in existing_mods}
+        kept_mod_ids = set()
+        default_lead = (assigned_ids[0] if (assigned_ids and len(assigned_ids) > 0) else (project.lead_id or current_user.id))
+
+        for idx, m_dict in enumerate(modules_data):
+            m_id = m_dict.get("id")
+            m_name = (m_dict.get("name") or "").strip()
+            if not m_name:
+                continue
+            m_desc = m_dict.get("description", "")
+            m_status = m_dict.get("status", "Not Started")
+            m_priority = m_dict.get("priority", "Medium")
+            m_progress = float(m_dict.get("progress", 0.0) or 0.0)
+            m_assignee = m_dict.get("assigned_to_id") or default_lead
+
+            if m_id and m_id in existing_mod_map:
+                mod = existing_mod_map[m_id]
+                mod.name = m_name
+                mod.description = m_desc
+                mod.status = m_status
+                mod.priority = m_priority
+                mod.progress = m_progress
+                mod.assigned_to_id = m_assignee
+                mod.sort_order = idx
+                mod.updated_at = datetime.utcnow()
+                kept_mod_ids.add(m_id)
+            else:
+                new_mod = Module(
+                    project_id=project.id,
+                    name=m_name,
+                    description=m_desc,
+                    status=m_status,
+                    priority=m_priority,
+                    progress=m_progress,
+                    start_date=project.start_date,
+                    deadline=project.deadline,
+                    assigned_to_id=m_assignee,
+                    sort_order=idx
+                )
+                db.add(new_mod)
+                db.flush()
+                current_assigned_uids = assigned_ids if assigned_ids is not None else [a.user_id for a in project.employee_assignments]
+                for uid in current_assigned_uids:
+                    db.add(ModuleEmployeeAssignment(module_id=new_mod.id, user_id=uid))
+                if m_desc:
+                    db.add(Update(
+                        module_id=new_mod.id,
+                        user_id=current_user.id,
+                        description_text=m_desc
+                    ))
+                kept_mod_ids.add(new_mod.id)
+
+        # Soft-delete removed modules
+        for m_id, mod in existing_mod_map.items():
+            if m_id not in kept_mod_ids:
+                mod.is_deleted = True
 
     for key, val in update_data.items():
         setattr(project, key, val)
@@ -462,13 +530,24 @@ def complete_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    role_name = current_user.role.name if current_user.role else ""
-    if role_name not in ["Developer", "Director", "Project Manager", "Manager"]:
-        raise HTTPException(status_code=403, detail="Unauthorized to complete project")
-
     project = db.query(Project).filter(Project.id == project_id, Project.is_deleted == False).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    role_name = current_user.role.name if current_user.role else ""
+    is_assigned = db.query(ProjectEmployeeAssignment).filter(
+        ProjectEmployeeAssignment.project_id == project_id,
+        ProjectEmployeeAssignment.user_id == current_user.id
+    ).first()
+    is_lead = project.lead_id == current_user.id
+    is_mod_assigned = db.query(Module).filter(
+        Module.project_id == project_id,
+        Module.assigned_to_id == current_user.id,
+        Module.is_deleted == False
+    ).first()
+
+    if role_name not in ["Developer", "Director", "Project Manager", "Manager"] and not is_assigned and not is_lead and not is_mod_assigned:
+        raise HTTPException(status_code=403, detail="Unauthorized to complete project")
 
     active_modules = [m for m in project.modules if not m.is_deleted]
     unfinished = [m for m in active_modules if m.status != "Closed"]
@@ -478,7 +557,13 @@ def complete_project(
             detail=f"Project has {len(unfinished)} unfinished module(s). Please confirm or complete modules first."
         )
 
+    if force:
+        for m in active_modules:
+            m.status = "Closed"
+            m.progress = 100.0
+
     project.status = "Closed"
+    project.progress = 100.0
     calculate_and_update_project_progress(project.id, db)
     project.updated_at = datetime.utcnow()
     db.commit()

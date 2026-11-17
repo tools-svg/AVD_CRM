@@ -8,9 +8,18 @@ from app.permissions.deps import get_current_user
 
 router = APIRouter(prefix="/upload", tags=["Upload"])
 
-ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
-ALLOWED_CONTENT_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
-MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
+ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".svg", ".jfif"}
+ALLOWED_CONTENT_TYPES = {
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/webp",
+    "image/svg+xml",
+    "image/pjpeg",
+    "image/jfif",
+    "image/x-png",
+}
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
 @router.post("/image")
 async def upload_image(
@@ -19,8 +28,8 @@ async def upload_image(
 ):
     """
     Upload image for member avatar or company logo (Section 3).
-    Supported formats: PNG, JPG/JPEG, WEBP.
-    Validation: Content-type, extension, file size up to 5MB.
+    Supported formats: PNG, JPG/JPEG, WEBP, SVG.
+    Validation: Content-type, extension, file size up to 10MB.
     """
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file selected")
@@ -30,14 +39,15 @@ async def upload_image(
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported image format '{ext}'. Supported formats: PNG, JPG, JPEG, WEBP"
+            detail=f"Unsupported image format '{ext}'. Supported formats: PNG, JPG, JPEG, WEBP, SVG"
         )
 
-    # Content-type validation
-    if file.content_type and file.content_type.lower() not in ALLOWED_CONTENT_TYPES:
+    # Content-type validation (clean params if present)
+    content_type = (file.content_type or "").lower().split(";")[0].strip()
+    if content_type and content_type not in ALLOWED_CONTENT_TYPES and content_type != "application/octet-stream":
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid MIME type '{file.content_type}'. Must be an image (PNG, JPG, WEBP)"
+            detail=f"Invalid MIME type '{file.content_type}'. Must be an image (PNG, JPG, WEBP, SVG)"
         )
 
     # Read content to check file size

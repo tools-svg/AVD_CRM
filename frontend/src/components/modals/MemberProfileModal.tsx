@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Check, Loader2, User as UserIcon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
@@ -11,12 +11,21 @@ interface MemberProfileModalProps {
 }
 
 export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({ isOpen, onClose }) => {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const [fullName, setFullName] = useState(user?.full_name || '');
   const [avatarUrl, setAvatarUrl] = useState(user?.avatar_url || '');
   const [password, setPassword] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    if (isOpen && user) {
+      setFullName(user.full_name || '');
+      setAvatarUrl(user.avatar_url || '');
+      setPassword('');
+      setStatusMsg(null);
+    }
+  }, [isOpen, user]);
 
   if (!isOpen) return null;
 
@@ -25,27 +34,24 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({ isOpen, 
     setIsSaving(true);
     setStatusMsg(null);
     try {
+      const cleanName = fullName.trim();
+      const cleanAvatar = avatarUrl.trim();
+      const cleanPass = password.trim();
+
       const updated = await api.updateMe({
-        full_name: fullName,
-        avatar_url: avatarUrl,
-        password: password.trim() ? password.trim() : undefined,
+        full_name: cleanName || undefined,
+        avatar_url: cleanAvatar,
+        password: cleanPass ? cleanPass : undefined,
       });
 
-      // Update localStorage cached user
-      const cached = localStorage.getItem('avd_user');
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached);
-          localStorage.setItem('avd_user', JSON.stringify({ ...parsed, full_name: updated.full_name, avatar_url: updated.avatar_url }));
-        } catch {}
-      }
+      // Update AuthContext state immediately so the navbar and all views reflect the new avatar
+      await refreshUser();
 
       setStatusMsg({ type: 'success', text: 'Profile updated successfully!' });
       toast.success('Profile Updated', 'Profile updated successfully!');
       setTimeout(() => {
         onClose();
-        window.location.reload(); // Refresh to propagate updated avatar everywhere
-      }, 700);
+      }, 500);
     } catch (err: any) {
       setStatusMsg({ type: 'error', text: err.message || 'Failed to update profile.' });
       toast.error('Update Failed', err.message || 'Failed to update profile.');
