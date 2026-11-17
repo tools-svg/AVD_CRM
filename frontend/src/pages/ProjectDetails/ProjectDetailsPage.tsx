@@ -17,7 +17,7 @@ import {
 import { GlobalNavbar } from '../../components/navigation/GlobalNavbar';
 import { BackToTop } from '../../components/navigation/BackToTop';
 import { PreviewPanel, PreviewMode } from '../../components/preview/PreviewPanel';
-import { InteractiveGantt } from '../../components/gantt/InteractiveGantt';
+//import { InteractiveGantt } from '../../components/gantt/InteractiveGantt';
 import { ModuleUpdateModal } from '../../components/modals/ModuleUpdateModal';
 import { ShareProjectModal } from '../../components/modals/ShareProjectModal';
 import { CompleteProjectModal } from '../../components/modals/CompleteProjectModal';
@@ -468,7 +468,7 @@ export const ProjectDetailsPage: React.FC = () => {
             </div>
 
             {/* SECTION 9.5: Project Gantt Chart */}
-            <InteractiveGantt projectId={project.id} />
+            {/* <InteractiveGantt projectId={project.id} /> */}
           </div>
 
           {/* Right 25%: Preview Panel with Open Button */}

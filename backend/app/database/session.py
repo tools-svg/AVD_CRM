@@ -69,6 +69,14 @@ def normalize_database_url(raw_url: str) -> str:
 
 
 def create_configured_engine(db_url: str):
+    if db_url.startswith("sqlite"):
+        from sqlalchemy.pool import StaticPool
+        return create_engine(
+            db_url,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+
     connect_args = {}
     if "sslmode" not in db_url.lower() and "localhost" not in db_url and "127.0.0.1" not in db_url:
         connect_args = {"sslmode": "require"}

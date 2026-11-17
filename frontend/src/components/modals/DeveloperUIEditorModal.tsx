@@ -25,6 +25,7 @@ import {
   Lock
 } from 'lucide-react';
 import { useUIConfig } from '../../context/UIConfigContext';
+import { useAuth } from '../../context/AuthContext';
 import { toast } from '../../context/NotificationContext';
 import { 
   RoleName, 
@@ -55,8 +56,10 @@ export const DeveloperUIEditorModal: React.FC = () => {
     setCustomizationRole, 
     uiConfig, 
     updateConfig, 
-    refreshConfig 
+    refreshConfig,
+    setIsDirectEditingMode,
   } = useUIConfig();
+  const { refreshUser } = useAuth();
 
   // Active Main Navigation Tab
   const [activeTab, setActiveTab] = useState<'users' | 'companies' | 'ui_customizer' | 'history' | 'snapshots' | 'sessions'>('users');
@@ -196,10 +199,36 @@ export const DeveloperUIEditorModal: React.FC = () => {
 
   useEffect(() => {
     if (uiConfig) {
-      setDraftTheme(uiConfig.global_theme || {});
-      setDraftNavbar(uiConfig.navbar || {});
-      setDraftStats(uiConfig.statistics || {});
-      setDraftProjects(uiConfig.project_list || {});
+      setDraftTheme({
+        backgroundColor: '#EBE5E5',
+        cardBackgroundColor: '#E8E4E4',
+        primaryButtonColor: '#0A0A0A',
+        cardBorderRadius: '14px',
+        buttonBorderRadius: '10px',
+        logoBorderRadius: '2%',
+        ...(uiConfig.global_theme || {}),
+      });
+      setDraftNavbar({
+        titleText: 'AVD Management',
+        searchPlaceholder: 'Search projects, modules, employees...',
+        showSlideshow: true,
+        ...(uiConfig.navbar || {}),
+      });
+      setDraftStats({
+        visible: true,
+        card1Label: 'Total Projects',
+        card2Label: 'Completed',
+        card3Label: 'Ongoing',
+        ...(uiConfig.statistics || {}),
+      });
+      setDraftProjects({
+        showGantt: true,
+        initialRows: 3,
+        showStatus: true,
+        showPriority: true,
+        showProgress: true,
+        ...(uiConfig.project_list || {}),
+      });
     }
   }, [uiConfig, customizationRole]);
 
@@ -242,10 +271,10 @@ export const DeveloperUIEditorModal: React.FC = () => {
       if (editingUser) {
         // Edit User
         const payload: any = {
-          email: userFormData.email,
-          full_name: userFormData.full_name,
+          email: userFormData.email.trim(),
+          full_name: userFormData.full_name.trim(),
           role_id: userFormData.role_id,
-          avatar_url: userFormData.avatar_url,
+          avatar_url: userFormData.avatar_url.trim() || undefined,
           company_ids: userFormData.company_ids,
           is_active: userFormData.is_active,
         };
@@ -260,11 +289,21 @@ export const DeveloperUIEditorModal: React.FC = () => {
           toast.warning('Password Required', 'Password is required for new member creation.');
           return;
         }
-        await api.createUser(userFormData);
+        const payload: any = {
+          ...userFormData,
+          username: userFormData.username.trim(),
+          email: userFormData.email.trim(),
+          full_name: userFormData.full_name.trim(),
+          avatar_url: userFormData.avatar_url.trim() || undefined,
+        };
+        await api.createUser(payload);
         toast.success('Member Created', `Member '${userFormData.full_name}' created successfully!`);
       }
       setIsUserModalOpen(false);
-      loadAdministrativeData();
+      await loadAdministrativeData();
+      try {
+        await refreshUser();
+      } catch {}
     } catch (err: any) {
       toast.error('User Operation Failed', err.message || 'Operation failed');
     }
@@ -325,15 +364,25 @@ export const DeveloperUIEditorModal: React.FC = () => {
   const handleSaveCompany = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const payload: Partial<Company> = {
+        name: companyFormData.name.trim(),
+        code: companyFormData.code.trim().toUpperCase(),
+        logo_url: companyFormData.logo_url.trim() || undefined,
+        description: companyFormData.description.trim() || undefined,
+      };
+
       if (editingCompany) {
-        await api.updateCompany(editingCompany.id, companyFormData);
+        await api.updateCompany(editingCompany.id, payload);
         toast.success('Company Saved', `Company '${companyFormData.name}' updated successfully!`);
       } else {
-        await api.createCompany(companyFormData);
+        await api.createCompany(payload);
         toast.success('Company Created', `Company '${companyFormData.name}' created successfully!`);
       }
       setIsCompanyModalOpen(false);
-      loadAdministrativeData();
+      await loadAdministrativeData();
+      try {
+        await refreshUser();
+      } catch {}
     } catch (err: any) {
       toast.error('Company Operation Failed', err.message || 'Operation failed');
     }
@@ -359,6 +408,45 @@ export const DeveloperUIEditorModal: React.FC = () => {
   };
 
   // --- UI CUSTOMIZER HANDLERS (Section 14.3) ---
+  const handleSaveTextChanges = async () => {
+    try {
+      const mergedNavbar = { ...(uiConfig.navbar || {}), ...draftNavbar };
+      const mergedStats = { ...(uiConfig.statistics || {}), ...draftStats };
+      await updateConfig('navbar', mergedNavbar);
+      await updateConfig('statistics', mergedStats);
+      toast.success('Live UI Updated', 'Saved & applied navbar and statistics text live!');
+      loadHistory();
+    } catch (e: any) {
+      toast.error('Save Failed', e.message);
+    }
+  };
+
+  const handleSaveDesign = async () => {
+    try {
+      const mergedTheme = { ...(uiConfig.global_theme || {}), ...draftTheme };
+      await updateConfig('global_theme', mergedTheme);
+      toast.success('Live UI Updated', 'Saved & applied design theme live!');
+      loadHistory();
+    } catch (e: any) {
+      toast.error('Save Failed', e.message);
+    }
+  };
+
+  const handleSaveLayout = async () => {
+    try {
+      const mergedStats = { ...(uiConfig.statistics || {}), ...draftStats };
+      const mergedNavbar = { ...(uiConfig.navbar || {}), ...draftNavbar };
+      const mergedProjects = { ...(uiConfig.project_list || {}), ...draftProjects };
+      await updateConfig('statistics', mergedStats);
+      await updateConfig('navbar', mergedNavbar);
+      await updateConfig('project_list', mergedProjects);
+      toast.success('Live UI Updated', 'Saved & applied layout configuration live!');
+      loadHistory();
+    } catch (e: any) {
+      toast.error('Save Failed', e.message);
+    }
+  };
+
   const handleSaveComponent = async (componentKey: string, configData: any) => {
     try {
       await updateConfig(componentKey, configData);
@@ -684,7 +772,7 @@ export const DeveloperUIEditorModal: React.FC = () => {
           {/* ======================================================== */}
           {activeTab === 'ui_customizer' && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between border-b border-[#E1DCDC] pb-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[#E1DCDC] pb-2 gap-2">
                 <div className="flex items-center space-x-2">
                   <span className="text-xs font-bold text-[#0A0A0A] uppercase tracking-wider">
                     Editing UI for:
@@ -694,35 +782,51 @@ export const DeveloperUIEditorModal: React.FC = () => {
                   </span>
                 </div>
 
-                {/* Sub-tabs for UI Customizer */}
-                <div className="flex items-center space-x-1 bg-[#F5F3F4] p-1 rounded-[8px] border border-[#E1DCDC]">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setUiSubTab('text')}
-                    className={`px-2.5 py-1 rounded-[6px] text-xs font-semibold transition-all ${
-                      uiSubTab === 'text' ? 'bg-white shadow-2xs text-[#0A0A0A]' : 'text-[#888888]'
-                    }`}
+                    onClick={() => {
+                      setIsEditorOpen(false);
+                      setIsDirectEditingMode(true);
+                    }}
+                    className="px-2.5 py-1 rounded-[8px] bg-[#0A0A0A] text-white hover:bg-[#333333] text-xs font-semibold flex items-center space-x-1.5 transition-colors shadow-2xs"
+                    title="Click any element directly on screen to inspect, style, and edit text visually"
                   >
-                    Text & Headings
+                    <Edit2 className="w-3 h-3 text-[#5269A8]" />
+                    <span className="hidden sm:inline">Launch On-Screen Visual Editor</span>
+                    <span className="sm:hidden">On-Screen</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setUiSubTab('design')}
-                    className={`px-2.5 py-1 rounded-[6px] text-xs font-semibold transition-all ${
-                      uiSubTab === 'design' ? 'bg-white shadow-2xs text-[#0A0A0A]' : 'text-[#888888]'
-                    }`}
-                  >
-                    Design & Radii
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setUiSubTab('components')}
-                    className={`px-2.5 py-1 rounded-[6px] text-xs font-semibold transition-all ${
-                      uiSubTab === 'components' ? 'bg-white shadow-2xs text-[#0A0A0A]' : 'text-[#888888]'
-                    }`}
-                  >
-                    Component Layout
-                  </button>
+
+                  {/* Sub-tabs for UI Customizer */}
+                  <div className="flex items-center space-x-1 bg-[#F5F3F4] p-1 rounded-[8px] border border-[#E1DCDC]">
+                    <button
+                      type="button"
+                      onClick={() => setUiSubTab('text')}
+                      className={`px-2.5 py-1 rounded-[6px] text-xs font-semibold transition-all ${
+                        uiSubTab === 'text' ? 'bg-white shadow-2xs text-[#0A0A0A]' : 'text-[#888888]'
+                      }`}
+                    >
+                      Text & Headings
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUiSubTab('design')}
+                      className={`px-2.5 py-1 rounded-[6px] text-xs font-semibold transition-all ${
+                        uiSubTab === 'design' ? 'bg-white shadow-2xs text-[#0A0A0A]' : 'text-[#888888]'
+                      }`}
+                    >
+                      Design & Radii
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUiSubTab('components')}
+                      className={`px-2.5 py-1 rounded-[6px] text-xs font-semibold transition-all ${
+                        uiSubTab === 'components' ? 'bg-white shadow-2xs text-[#0A0A0A]' : 'text-[#888888]'
+                      }`}
+                    >
+                      Component Layout
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -801,10 +905,7 @@ export const DeveloperUIEditorModal: React.FC = () => {
                   <div className="flex justify-end space-x-2 pt-2">
                     <button
                       type="button"
-                      onClick={() => {
-                        handleSaveComponent('navbar', draftNavbar);
-                        handleSaveComponent('statistics', draftStats);
-                      }}
+                      onClick={handleSaveTextChanges}
                       className="px-4 py-2 rounded-[10px] bg-[#0A0A0A] text-white text-xs font-semibold hover:bg-[#333333] flex items-center space-x-1.5"
                     >
                       <Save className="w-3.5 h-3.5" />
@@ -918,7 +1019,7 @@ export const DeveloperUIEditorModal: React.FC = () => {
                   <div className="pt-2 flex justify-end">
                     <button
                       type="button"
-                      onClick={() => handleSaveComponent('global_theme', draftTheme)}
+                      onClick={handleSaveDesign}
                       className="px-4 py-2 rounded-[10px] bg-[#0A0A0A] text-white text-xs font-semibold hover:bg-[#333333] flex items-center space-x-1.5"
                     >
                       <Save className="w-3.5 h-3.5" />
@@ -972,11 +1073,7 @@ export const DeveloperUIEditorModal: React.FC = () => {
                   <div className="pt-2 flex justify-end">
                     <button
                       type="button"
-                      onClick={() => {
-                        handleSaveComponent('statistics', draftStats);
-                        handleSaveComponent('navbar', draftNavbar);
-                        handleSaveComponent('project_list', draftProjects);
-                      }}
+                      onClick={handleSaveLayout}
                       className="px-4 py-2 rounded-[10px] bg-[#0A0A0A] text-white text-xs font-semibold hover:bg-[#333333] flex items-center space-x-1.5"
                     >
                       <Save className="w-3.5 h-3.5" />

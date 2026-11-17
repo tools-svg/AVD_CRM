@@ -43,6 +43,33 @@ export const UIConfigProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     loadConfig();
   }, [activeTargetRole]);
 
+  // Apply theme settings to DOM root and body live
+  useEffect(() => {
+    const theme = uiConfig.global_theme;
+    if (theme) {
+      const root = document.documentElement;
+      if (theme.backgroundColor) {
+        root.style.setProperty('--avd-bg-color', theme.backgroundColor);
+        document.body.style.backgroundColor = theme.backgroundColor;
+      }
+      if (theme.cardBackgroundColor) {
+        root.style.setProperty('--avd-card-bg', theme.cardBackgroundColor);
+      }
+      if (theme.primaryButtonColor) {
+        root.style.setProperty('--avd-primary-btn', theme.primaryButtonColor);
+      }
+      if (theme.cardBorderRadius) {
+        root.style.setProperty('--avd-card-radius', theme.cardBorderRadius);
+      }
+      if (theme.buttonBorderRadius) {
+        root.style.setProperty('--avd-btn-radius', theme.buttonBorderRadius);
+      }
+      if (theme.logoBorderRadius) {
+        root.style.setProperty('--avd-logo-radius', theme.logoBorderRadius);
+      }
+    }
+  }, [uiConfig.global_theme]);
+
   const updateConfig = async (componentKey: string, newConfig: any) => {
     const jsonStr = JSON.stringify(newConfig);
     await api.saveUIConfig(customizationRole, componentKey, jsonStr);

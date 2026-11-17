@@ -187,6 +187,7 @@ class ProjectUpdate(BaseModel):
     deadline: Optional[datetime] = None
     is_draft: Optional[bool] = None
     assigned_employee_ids: Optional[List[int]] = None
+    modules: Optional[List[Dict[str, Any]]] = None
 
 class ProjectOut(ProjectBase):
     id: int

@@ -80,12 +80,13 @@ def create_user(
         raise HTTPException(status_code=400, detail="Username or email already exists")
 
     hashed_pw = get_password_hash(payload.password)
+    clean_avatar = payload.avatar_url.strip() or None if payload.avatar_url else None
     user = User(
         username=payload.username,
         email=payload.email,
         hashed_password=hashed_pw,
         full_name=payload.full_name,
-        avatar_url=payload.avatar_url,
+        avatar_url=clean_avatar,
         role_id=payload.role_id,
         is_active=payload.is_active
     )
@@ -142,6 +143,8 @@ def update_user(
             db.add(UserCompanyAssignment(user_id=user.id, company_id=cid))
 
     for k, v in update_data.items():
+        if k == "avatar_url" and isinstance(v, str):
+            v = v.strip() or None
         setattr(user, k, v)
 
     db.commit()

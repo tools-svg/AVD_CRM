@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from typing import List
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -25,6 +26,13 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> List[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+
+    @model_validator(mode="after")
+    def resolve_upload_dir(self):
+        if not os.path.isabs(self.UPLOAD_DIR):
+            self.UPLOAD_DIR = str((BACKEND_DIR / self.UPLOAD_DIR).resolve())
+        os.makedirs(self.UPLOAD_DIR, exist_ok=True)
+        return self
 
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE) if ENV_FILE.exists() else None,

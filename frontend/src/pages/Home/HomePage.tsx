@@ -36,7 +36,7 @@ import { EditableUI } from '../../components/dev-editor/EditableUI';
 
 const PAYMENT_STATUS_CONFIG: Record<string, { bg: string; text: string }> = {
   'Quoted': { bg: '#F3F4F6', text: '#4B5563' },
-  'Partially Received': { bg: '#FEF3C7', text: '#D97706' },
+  '25% Received': { bg: '#FEF3C7', text: '#D97706' },
   '50% Received': { bg: '#E0F2FE', text: '#0284C7' },
   'Fully Received': { bg: '#DCFCE7', text: '#16A34A' },
   'On Hold': { bg: '#F3E8FF', text: '#9333EA' },
@@ -174,7 +174,10 @@ export const HomePage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#EBE5E5] flex flex-col">
+    <div 
+      className="min-h-screen flex flex-col transition-colors duration-200"
+      style={{ backgroundColor: uiConfig.global_theme?.backgroundColor || '#EBE5E5' }}
+    >
       <GlobalNavbar />
 
       {/* Main content wrapper with consistent 5px horizontal padding (Requirement 5) */}
@@ -189,7 +192,7 @@ export const HomePage: React.FC = () => {
                 {/* Horizontal Statistics with Equal Spacing & Alignment */}
                 <div className="flex items-center space-x-8 sm:space-x-14 flex-wrap gap-y-3">
                   {/* Total Projects */}
-                  <div className="flex flex-col">
+                  <div className="flex flex-col items-center text-center">
                     <span className="text-[11px] font-bold uppercase tracking-wider text-[#888888]">
                       <EditableUI id="stat_label_total" defaultText={uiConfig.statistics?.card1Label || 'Total Projects'} />
                     </span>
@@ -199,7 +202,7 @@ export const HomePage: React.FC = () => {
                   </div>
 
                   {/* Completed */}
-                  <div className="flex flex-col">
+                  <div className="flex flex-col items-center text-center">
                     <span className="text-[11px] font-bold uppercase tracking-wider text-[#2F614E]">
                       <EditableUI id="stat_label_completed" defaultText={uiConfig.statistics?.card2Label || 'Completed'} />
                     </span>
@@ -209,7 +212,7 @@ export const HomePage: React.FC = () => {
                   </div>
 
                   {/* Ongoing */}
-                  <div className="flex flex-col">
+                  <div className="flex flex-col items-center text-center">
                     <span className="text-[11px] font-bold uppercase tracking-wider text-[#2563EB]">
                       <EditableUI id="stat_label_ongoing" defaultText={uiConfig.statistics?.card3Label || 'Ongoing'} />
                     </span>
@@ -258,28 +261,28 @@ export const HomePage: React.FC = () => {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-6 sm:gap-10 text-xs">
-                  <div>
+                  <div className="text-center">
                     <span className="text-[10px] uppercase font-bold text-[#888888] block">Total Quoted</span>
                     <span className="text-sm font-extrabold text-[#111827]">
                       {financeDashboard.summary.currency} {financeDashboard.summary.total_quoted_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </span>
                   </div>
 
-                  <div>
+                  <div className="text-center">
                     <span className="text-[10px] uppercase font-bold text-[#2F614E] block">Total Collected</span>
                     <span className="text-sm font-extrabold text-[#2F614E]">
                       {financeDashboard.summary.currency} {financeDashboard.summary.total_received_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </span>
                   </div>
 
-                  <div>
+                  <div className="text-center">
                     <span className="text-[10px] uppercase font-bold text-[#A93232] block">Total Outstanding</span>
                     <span className="text-sm font-extrabold text-[#A93232]">
                       {financeDashboard.summary.currency} {financeDashboard.summary.total_remaining_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </span>
                   </div>
 
-                  <div>
+                  <div className="text-center">
                     <span className="text-[10px] uppercase font-bold text-[#5269A8] block">Recovery Rate</span>
                     <span className="text-sm font-extrabold text-[#5269A8]">
                       {financeDashboard.summary.collection_percentage}%
@@ -327,7 +330,7 @@ export const HomePage: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="flex items-center space-x-2 text-xs font-semibold bg-white px-3 py-1.5 rounded-[8px] border border-[#E1DCDC] shadow-2xs flex-shrink-0 self-start sm:self-auto">
+                    <div className="flex items-center justify-center space-x-2 text-xs font-semibold bg-white px-3 py-1.5 rounded-[8px] border border-[#E1DCDC] shadow-2xs flex-shrink-0 self-start sm:self-auto">
                       <span className="text-[#888888] text-[11px] font-bold uppercase tracking-wider mr-1">
                         Company Statistics:
                       </span>
@@ -349,7 +352,7 @@ export const HomePage: React.FC = () => {
                   <div className="overflow-x-auto">
                     {dashboardMode === 'amount' ? (
                       /* AMOUNT MODE TABLE (Requirement 2.B) */
-                      <table className="w-full table-fixed min-w-[880px] text-left text-xs">
+                      <table className="w-full table-fixed min-w-[880px] text-center text-xs">
                         <colgroup>
                           <col className="w-auto min-w-[200px]" />
                           <col className="w-[140px]" />
@@ -361,11 +364,11 @@ export const HomePage: React.FC = () => {
                         <thead className="bg-[#F5F3F4]/70 border-b border-[#E1DCDC] text-[10px] uppercase font-bold text-[#888888]">
                           <tr>
                             <th className="py-3 px-4">Project Name</th>
-                            <th className="py-3 px-3">Quoted Amount</th>
-                            <th className="py-3 px-3">Amount Received</th>
-                            <th className="py-3 px-3">Remaining Amount</th>
-                            <th className="py-3 px-3">Collection Status</th>
-                            <th className="py-3 px-4 text-right">Actions</th>
+                            <th className="py-3 px-2">Quoted Amount</th>
+                            <th className="py-3 px-1">Amount Received</th>
+                            <th className="py-3 px-1">Remaining Amount</th>
+                            <th className="py-3 px-5">Status</th>
+                            <th className="py-3 px-3">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-[#F5F3F4]">
@@ -384,7 +387,7 @@ export const HomePage: React.FC = () => {
                                 className="hover:bg-[#F9F9F9] transition-colors"
                               >
                                 {/* Project Name */}
-                                <td className="py-3 px-4 font-semibold text-[#333333] truncate">
+                                <td className="py-3 px-4 font-semibold text-[#333333] truncate text-center">
                                   <div 
                                     onClick={() => navigate(`/projects/${item.id}`)}
                                     className="truncate text-xs font-semibold text-[#0A0A0A] hover:underline cursor-pointer"
@@ -397,22 +400,22 @@ export const HomePage: React.FC = () => {
                                 </td>
 
                                 {/* Quoted Amount */}
-                                <td className="py-3 px-3 align-middle font-bold text-[#111827] text-xs">
+                                <td className="py-3 px-3 align-middle font-bold text-[#111827] text-xs text-center">
                                   {curr} {quotedVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                 </td>
 
                                 {/* Amount Received */}
-                                <td className="py-3 px-3 align-middle font-bold text-[#2F614E] text-xs">
+                                <td className="py-3 px-3 align-middle font-bold text-[#2F614E] text-xs text-center">
                                   {curr} {receivedVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                 </td>
 
                                 {/* Remaining Amount */}
-                                <td className="py-3 px-3 align-middle font-bold text-[#A93232] text-xs">
+                                <td className="py-3 px-3 align-middle font-bold text-[#A93232] text-xs text-center">
                                   {curr} {remainingVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                 </td>
 
                                 {/* Payment / Collection Status */}
-                                <td className="py-3 px-3 align-middle">
+                                <td className="py-3 px-3 align-middle text-center">
                                   <span
                                     style={{ backgroundColor: badge.bg, color: badge.text }}
                                     className="px-2.5 py-0.5 rounded-full text-[10px] font-bold inline-block whitespace-nowrap"
@@ -422,8 +425,8 @@ export const HomePage: React.FC = () => {
                                 </td>
 
                                 {/* Actions */}
-                                <td className="py-3 px-4 text-right whitespace-nowrap align-middle">
-                                  <div className="flex items-center justify-end space-x-1.5" onClick={e => e.stopPropagation()}>
+                                <td className="py-3 px-4 whitespace-nowrap align-middle text-center">
+                                  <div className="flex items-center justify-center space-x-1.5" onClick={e => e.stopPropagation()}>
                                     <button
                                       type="button"
                                       onClick={() => {
@@ -462,7 +465,7 @@ export const HomePage: React.FC = () => {
                       </table>
                     ) : (
                       /* PROJECT MODE TABLE (Requirement 2.A - Preserves existing layout) */
-                      <table className="w-full table-fixed min-w-[880px] text-left text-xs">
+                      <table className="w-full table-fixed min-w-[880px] text-center text-xs">
                         <colgroup>
                           <col className="w-auto min-w-[220px]" />
                           <col className="w-[115px]" />
@@ -492,7 +495,7 @@ export const HomePage: React.FC = () => {
                             <th className="py-3 px-3">
                               <EditableUI id="th_last_updated" defaultText="Last Updated" />
                             </th>
-                            <th className="py-3 px-4 text-right">
+                            <th className="py-3 px-4 text-center">
                               <EditableUI id="th_actions" defaultText="Actions" />
                             </th>
                           </tr>
@@ -509,7 +512,7 @@ export const HomePage: React.FC = () => {
                                 className="hover:bg-[#F9F9F9] cursor-pointer transition-colors"
                               >
                                 {/* Name & Module Count */}
-                                <td className="py-3 px-4 font-semibold text-[#333333] truncate">
+                                <td className="py-3 px-4 font-semibold text-[#333333] truncate text-center">
                                   <div className="truncate text-xs font-semibold text-[#0A0A0A]">
                                     {item.title}
                                   </div>
@@ -519,7 +522,7 @@ export const HomePage: React.FC = () => {
                                 </td>
 
                                 {/* Status Badge */}
-                                <td className="py-3 px-3 align-middle">
+                                <td className="py-3 px-3 align-middle text-center">
                                   <span
                                     style={{ backgroundColor: statusColor.bg, color: statusColor.text }}
                                     className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold inline-block whitespace-nowrap"
@@ -529,7 +532,7 @@ export const HomePage: React.FC = () => {
                                 </td>
 
                                 {/* Priority Badge */}
-                                <td className="py-3 px-3 align-middle">
+                                <td className="py-3 px-3 align-middle text-center">
                                   <span
                                     style={{ backgroundColor: priorityColor.bg, color: priorityColor.text }}
                                     className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold inline-block whitespace-nowrap"
@@ -539,8 +542,8 @@ export const HomePage: React.FC = () => {
                                 </td>
 
                                 {/* Progress */}
-                                <td className="py-3 px-3 align-middle">
-                                  <div className="flex items-center space-x-2">
+                                <td className="py-3 px-3 align-middle text-center">
+                                  <div className="flex items-center justify-center space-x-2">
                                     <div className="w-16 h-1.5 bg-[#E8E4E4] rounded-full overflow-hidden flex-shrink-0">
                                       <div
                                         style={{ width: `${item.progress}%` }}
@@ -554,20 +557,20 @@ export const HomePage: React.FC = () => {
                                 </td>
 
                                 {/* Deadline */}
-                                <td className="py-3 px-3 text-[#666666] whitespace-nowrap text-[11px] align-middle">
+                                <td className="py-3 px-3 text-[#666666] whitespace-nowrap text-[11px] align-middle text-center">
                                   {item.deadline
                                     ? new Date(item.deadline).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
                                     : 'No deadline'}
                                 </td>
 
                                 {/* Last Updated */}
-                                <td className="py-3 px-3 text-[#888888] whitespace-nowrap text-[10px] align-middle">
+                                <td className="py-3 px-3 text-[#888888] whitespace-nowrap text-[10px] align-middle text-center">
                                   {new Date(item.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}
                                 </td>
 
                                 {/* Actions */}
-                                <td className="py-3 px-4 text-right whitespace-nowrap align-middle">
-                                  <div className="flex items-center justify-end space-x-1.5" onClick={e => e.stopPropagation()}>
+                                <td className="py-3 px-4 whitespace-nowrap align-middle text-center">
+                                  <div className="flex items-center justify-center space-x-1.5" onClick={e => e.stopPropagation()}>
                                     <button
                                       onClick={() => navigate(`/projects/${item.id}`)}
                                       className="px-2.5 py-1 rounded-[8px] bg-[#F5F3F4] hover:bg-[#E8E4E4] text-[#333333] text-xs font-semibold flex items-center space-x-1 transition-colors"
@@ -614,9 +617,11 @@ export const HomePage: React.FC = () => {
         </section>
 
         {/* SECTION 7: Full-Width Gantt Chart */}
-        <section className="w-full">
-          <InteractiveGantt companyId={isDirectorOrDev ? undefined : (selectedCompanyId || undefined)} />
-        </section>
+        {uiConfig.project_list?.showGantt !== false && (
+          <section className="w-full">
+            <InteractiveGantt companyId={isDirectorOrDev ? undefined : (selectedCompanyId || undefined)} />
+          </section>
+        )}
       </main>
 
       {/* Project Financial Tracking & Payment Ledger Modal */}

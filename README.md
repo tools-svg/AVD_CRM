@@ -98,7 +98,7 @@ python run.py       # Seeds initial roles, sub-companies, test users & sample da
 python server.py    # Runs FastAPI server on http://127.0.0.1:8000
 ```
 
-#### 2. Start the Frontend:
+#### 2. Start the Frontend:  
 ```bash
 cd frontend
 npm install

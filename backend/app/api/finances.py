@@ -30,7 +30,7 @@ def _calculate_finance_status(quoted: float, received: float, requested_status: 
     - 50% Received MUST be backed by actual payment >= 50% of quoted.
     - Fully Received when received >= quoted and quoted > 0.
     - Quoted when received == 0.
-    - Partially Received when 0 < received < 50%.
+    - 25% Received when 0 < received < 50%.
     - Manual overrides like 'On Hold', 'Overdue', 'Cancelled' are preserved.
     """
     if requested_status in ["On Hold", "Overdue", "Cancelled"]:
@@ -49,7 +49,7 @@ def _calculate_finance_status(quoted: float, received: float, requested_status: 
     elif quoted > 0 and received >= (quoted * 0.5):
         return "50% Received"
     elif received > 0:
-        return "Partially Received"
+        return "25% Received"
     else:
         return "Quoted"
 

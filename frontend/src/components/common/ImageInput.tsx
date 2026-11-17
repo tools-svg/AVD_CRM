@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useId } from 'react';
 import { Upload, Link2, X, Image as ImageIcon, Loader2, AlertCircle, Check } from 'lucide-react';
 import { api } from '../../services/api';
 
@@ -10,6 +10,23 @@ interface ImageInputProps {
   isAvatar?: boolean;
 }
 
+function dataURLtoFile(dataurl: string, filename: string): File | null {
+  try {
+    const arr = dataurl.split(',');
+    if (arr.length < 2) return null;
+    const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/png';
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new File([u8arr], filename, { type: mime });
+  } catch {
+    return null;
+  }
+}
+
 export const ImageInput: React.FC<ImageInputProps> = ({
   value = '',
   onChange,
@@ -17,36 +34,57 @@ export const ImageInput: React.FC<ImageInputProps> = ({
   fallbackText = 'No image selected',
   isAvatar = false,
 }) => {
+  const uniqueId = useId();
+  const inputId = `file-input-${uniqueId.replace(/[:/]/g, '')}`;
+
   const [mode, setMode] = useState<'upload' | 'url'>('upload');
-  const [urlInput, setUrlInput] = useState('');
+  const [urlInput, setUrlInput] = useState(value || '');
   const [isUploading, setIsUploading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [imgLoadError, setImgLoadError] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
-  const MAX_SIZE = 5 * 1024 * 1024; // 5 MB
+  const ALLOWED_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.svg', '.jfif'];
+  const ALLOWED_TYPES = [
+    'image/png',
+    'image/jpeg',
+    'image/jpg',
+    'image/webp',
+    'image/svg+xml',
+    'image/pjpeg',
+    'image/jfif',
+    'image/x-png',
+  ];
+  const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
+
+  // Sync urlInput and clear errors when external value changes
+  useEffect(() => {
+    setUrlInput(value || '');
+    setImgLoadError(false);
+  }, [value]);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setErrorMsg(null);
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Format validation
-    const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-    if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) {
-      setErrorMsg('Invalid format. Only PNG, JPG, JPEG, and WEBP images are supported.');
+    // Extension validation
+    const lastDot = file.name.lastIndexOf('.');
+    const ext = lastDot !== -1 ? file.name.substring(lastDot).toLowerCase() : '';
+    if (!ALLOWED_EXTS.includes(ext)) {
+      setErrorMsg(`Invalid format '${ext || 'unknown'}'. Supported formats: PNG, JPG, JPEG, WEBP, SVG`);
       return;
     }
 
-    if (file.type && !ALLOWED_TYPES.includes(file.type.toLowerCase())) {
-      setErrorMsg('Invalid file type. Please choose a valid PNG, JPG, or WEBP image.');
+    // MIME type validation (relaxed for Windows / unmapped types)
+    if (file.type && !ALLOWED_TYPES.includes(file.type.toLowerCase()) && file.type !== 'application/octet-stream') {
+      setErrorMsg('Invalid file type. Please choose a valid PNG, JPG, WEBP, or SVG image.');
       return;
     }
 
-    // Size validation (5MB max)
+    // Size validation
     if (file.size > MAX_SIZE) {
-      setErrorMsg(`Image is too large (${(file.size / (1024 * 1024)).toFixed(1)}MB). Maximum allowed is 5MB.`);
+      setErrorMsg(`Image is too large (${(file.size / (1024 * 1024)).toFixed(1)}MB). Maximum allowed is 10MB.`);
       return;
     }
 
@@ -54,6 +92,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({
     try {
       const res = await api.uploadImage(file);
       onChange(res.url);
+      setUrlInput(res.url);
       setImgLoadError(false);
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to upload image. Please try again.');
@@ -63,7 +102,15 @@ export const ImageInput: React.FC<ImageInputProps> = ({
     }
   };
 
-  const handleApplyUrl = () => {
+  const handleUrlInputChange = (newVal: string) => {
+    setUrlInput(newVal);
+    setErrorMsg(null);
+    // Auto-propagate entered URL to parent state so saving the form always includes the new URL
+    onChange(newVal.trim());
+    if (imgLoadError) setImgLoadError(false);
+  };
+
+  const handleApplyUrl = async () => {
     setErrorMsg(null);
     const trimmed = urlInput.trim();
     if (!trimmed) {
@@ -71,28 +118,49 @@ export const ImageInput: React.FC<ImageInputProps> = ({
       return;
     }
 
-    // Strict HTTP / HTTPS protocol validation
-    try {
-      const parsed = new URL(trimmed);
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        setErrorMsg('Unsafe protocol. Only http:// or https:// URLs are permitted.');
+    // If it's a base64 data URI, auto-upload it to avoid oversized DB columns
+    if (trimmed.startsWith('data:image/')) {
+      const file = dataURLtoFile(trimmed, `uploaded_image_${Date.now()}.png`);
+      if (file) {
+        setIsUploading(true);
+        try {
+          const res = await api.uploadImage(file);
+          onChange(res.url);
+          setUrlInput(res.url);
+          setImgLoadError(false);
+          return;
+        } catch (err: any) {
+          setErrorMsg(err.message || 'Failed to process base64 image data.');
+          return;
+        } finally {
+          setIsUploading(false);
+        }
+      }
+    }
+
+    // Validation: allow relative paths (/logos/..., /uploads/..., etc.) or standard HTTP(S)
+    if (!trimmed.startsWith('/') && !trimmed.startsWith('./') && !trimmed.startsWith('data:')) {
+      try {
+        const parsed = new URL(trimmed);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          setErrorMsg('Unsafe protocol. Only http:// or https:// URLs are permitted.');
+          return;
+        }
+      } catch {
+        setErrorMsg('Invalid URL format. Please enter a valid path (/logos/1.png) or http(s):// address.');
         return;
       }
-    } catch {
-      setErrorMsg('Invalid URL format. Please enter a valid http:// or https:// address.');
-      return;
     }
 
     onChange(trimmed);
     setImgLoadError(false);
-    setUrlInput('');
   };
 
   const handleRemove = () => {
     onChange('');
+    setUrlInput('');
     setImgLoadError(false);
     setErrorMsg(null);
-    setUrlInput('');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -123,7 +191,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({
             <div className="flex flex-col items-center justify-center text-[#888888] p-1 text-center">
               <ImageIcon className="w-5 h-5 opacity-40 mb-0.5" />
               <span className="text-[9px] leading-tight text-[#888888]">
-                {imgLoadError ? 'Broken URL' : 'None'}
+                {imgLoadError ? 'Broken URL' : fallbackText === 'No image selected' ? 'None' : fallbackText}
               </span>
             </div>
           )}
@@ -141,7 +209,10 @@ export const ImageInput: React.FC<ImageInputProps> = ({
           <div className="flex items-center space-x-1">
             <button
               type="button"
-              onClick={() => { setMode('upload'); setErrorMsg(null); }}
+              onClick={() => {
+                setMode('upload');
+                setErrorMsg(null);
+              }}
               className={`px-2.5 py-1 rounded-[6px] text-xs font-semibold flex items-center space-x-1.5 transition-colors ${
                 mode === 'upload'
                   ? 'bg-[#0A0A0A] text-white'
@@ -153,7 +224,11 @@ export const ImageInput: React.FC<ImageInputProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => { setMode('url'); setErrorMsg(null); }}
+              onClick={() => {
+                setMode('url');
+                setErrorMsg(null);
+                if (!urlInput && value) setUrlInput(value);
+              }}
               className={`px-2.5 py-1 rounded-[6px] text-xs font-semibold flex items-center space-x-1.5 transition-colors ${
                 mode === 'url'
                   ? 'bg-[#0A0A0A] text-white'
@@ -182,33 +257,44 @@ export const ImageInput: React.FC<ImageInputProps> = ({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+                accept=".png,.jpg,.jpeg,.webp,.svg,.jfif,image/png,image/jpeg,image/webp,image/svg+xml"
                 onChange={handleFileSelect}
                 className="hidden"
-                id={`file-input-${label.replace(/\s+/g, '-').toLowerCase()}`}
+                id={inputId}
               />
-              <label
-                htmlFor={`file-input-${label.replace(/\s+/g, '-').toLowerCase()}`}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
                 className="cursor-pointer px-3 py-1.5 rounded-[8px] bg-white border border-[#E1DCDC] hover:border-[#0A0A0A] text-xs font-medium text-[#333333] flex items-center space-x-1.5 shadow-2xs transition-colors"
               >
                 <Upload className="w-3.5 h-3.5 text-[#5269A8]" />
                 <span>{value ? 'Change Selected Image' : 'Choose Local File...'}</span>
-              </label>
+              </button>
               <span className="text-[11px] text-[#888888] truncate">
-                PNG, JPG, WEBP (Max 5MB)
+                PNG, JPG, WEBP, SVG (Max 10MB)
               </span>
             </div>
           )}
 
-          {/* Mode 2: Online URL Input */}
+          {/* Mode 2: Online or Local Relative URL Input */}
           {mode === 'url' && (
             <div className="flex items-center space-x-1.5">
               <input
-                type="url"
-                placeholder="https://example.com/logo.png"
+                type="text"
+                placeholder="https://... or /logos/1.png"
                 value={urlInput}
-                onChange={e => setUrlInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleApplyUrl(); } }}
+                onChange={e => handleUrlInputChange(e.target.value)}
+                onBlur={() => {
+                  if (urlInput.trim() && urlInput.trim() !== value) {
+                    handleApplyUrl();
+                  }
+                }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleApplyUrl();
+                  }
+                }}
                 className="flex-1 bg-white border border-[#E1DCDC] rounded-[8px] px-2.5 py-1 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A]"
               />
               <button
@@ -241,4 +327,3 @@ export const ImageInput: React.FC<ImageInputProps> = ({
     </div>
   );
 };
-

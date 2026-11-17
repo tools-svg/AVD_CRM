@@ -18,7 +18,7 @@ class Company(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), unique=True, nullable=False, index=True)
     code = Column(String(20), unique=True, nullable=False)
-    logo_url = Column(String(255), nullable=True)
+    logo_url = Column(Text, nullable=True)
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
@@ -35,7 +35,7 @@ class User(Base):
     email = Column(String(100), unique=True, nullable=False, index=True)
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(100), nullable=False)
-    avatar_url = Column(String(255), nullable=True)
+    avatar_url = Column(Text, nullable=True)
     role_id = Column(Integer, ForeignKey("roles.id"), nullable=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
@@ -323,7 +323,7 @@ class ProjectFinance(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), unique=True, nullable=False, index=True)
     currency = Column(String(10), default="₹") # e.g. ₹, $, USD, EUR, GBP
     quoted_amount = Column(Float, default=0.0, nullable=False)
-    status = Column(String(50), default="Quoted", index=True) # Quoted, 50% Received, Partially Received, Fully Received, On Hold, Overdue, Cancelled
+    status = Column(String(50), default="Quoted", index=True) # Quoted, 50% Received, 25% Received, Fully Received, On Hold, Overdue, Cancelled
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
