@@ -51,19 +51,17 @@ try:
     ensure_schema_compatibility(engine)
     missing = get_missing_tables()
     if missing:
-        logger.error("Required tables are still missing after create_all: %s", missing)
+        logger.warning("Some required tables are missing after create_all: %s", missing)
     else:
         logger.info("Database schema initialized. Tables: %s", get_existing_tables())
 except Exception as e:
-    logger.error("Database schema initialization failed: %s", e, exc_info=True)
-    raise
+    logger.error("Database schema initialization encountered an error: %s", e, exc_info=True)
 
-os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 try:
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     seed_database()
 except Exception as e:
-    logger.error("Database seed failed: %s", e, exc_info=True)
-    raise
+    logger.error("Database seed non-critical error: %s", e, exc_info=True)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

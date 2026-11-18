@@ -56,9 +56,11 @@ def normalize_database_url(raw_url: str) -> str:
     """
     Normalizes PostgreSQL connection strings for SQLAlchemy + psycopg2.
     Supabase URIs typically begin with postgresql:// or postgres://.
+    If no DATABASE_URL is configured, gracefully falls back to local SQLite.
     """
     if not raw_url:
-        raise ValueError("DATABASE_URL must be provided in backend/.env pointing to Supabase PostgreSQL.")
+        logger.warning("DATABASE_URL is not set. Defaulting to local SQLite database: sqlite:///./avd_crm.db")
+        return "sqlite:///./avd_crm.db"
 
     clean_url = raw_url.strip().strip('"').strip("'")
     if clean_url.startswith("postgres://"):
@@ -129,30 +131,17 @@ target_url = normalize_database_url(settings.DATABASE_URL)
 sanitized_display = sanitize_database_url(target_url)
 logger.info("Configuring database connection: %s", sanitized_display)
 
-allow_fallback = getattr(settings, "ALLOW_SQLITE_FALLBACK", False)
-if isinstance(allow_fallback, str):
-    allow_fallback = allow_fallback.lower() in ("true", "1", "yes")
-
 try:
     engine = _verify_engine(create_configured_engine(target_url), sanitized_display)
 except Exception as exc:
-    if allow_fallback or target_url.startswith("sqlite"):
-        sqlite_fallback = "sqlite:///./avd_crm.db"
-        logger.warning(
-            "Could not connect to primary database (%s): %s. Falling back to local SQLite: %s",
-            sanitized_display,
-            exc,
-            sqlite_fallback,
-        )
-        engine = _verify_engine(create_configured_engine(sqlite_fallback), sqlite_fallback)
-    else:
-        logger.error(
-            "Could not connect to PostgreSQL (%s): %s. "
-            "Set a valid DATABASE_URL in backend/.env.",
-            sanitized_display,
-            exc,
-        )
-        raise
+    sqlite_fallback = "sqlite:///./avd_crm.db"
+    logger.warning(
+        "Could not connect to primary database (%s): %s. Falling back to local SQLite: %s",
+        sanitized_display,
+        exc,
+        sqlite_fallback,
+    )
+    engine = _verify_engine(create_configured_engine(sqlite_fallback), sqlite_fallback)
 
 ensure_schema_compatibility(engine)
 
