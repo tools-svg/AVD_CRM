@@ -1,9 +1,11 @@
 import secrets
+import logging
 from datetime import datetime, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, desc
+from sqlalchemy import or_, desc, text
+from sqlalchemy.exc import SQLAlchemyError
 from app.database.session import get_db
 from app.models.all_models import User, UserCompanyAssignment, UserSession
 from app.schemas.schemas import (
@@ -20,6 +22,7 @@ from app.core.security import verify_password, create_access_token, get_password
 from app.permissions.deps import get_current_user, require_roles
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+logger = logging.getLogger("avd.auth")
 
 @router.post("/login", response_model=Token)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
@@ -38,22 +41,27 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
 
     # User Login Tracking (Requirement 3)
     session_id = secrets.token_hex(24)
-    client_ip = request.headers.get("x-forwarded-for") or (request.client.host if request.client else None)
+    raw_ip = request.headers.get("x-forwarded-for") or (request.client.host if request.client else None)
+    client_ip = raw_ip.split(",")[0].strip() if raw_ip else None
     user_agent = request.headers.get("user-agent", "")[:250]
 
-    user_session = UserSession(
-        session_id=session_id,
-        user_id=user.id,
-        username=user.username,
-        role_name=role_name,
-        ip_address=client_ip,
-        user_agent=user_agent,
-        login_time=datetime.utcnow(),
-        last_heartbeat=datetime.utcnow(),
-        status="active"
-    )
-    db.add(user_session)
-    db.commit()
+    try:
+        user_session = UserSession(
+            session_id=session_id,
+            user_id=user.id,
+            username=user.username,
+            role_name=role_name,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            login_time=datetime.utcnow(),
+            last_heartbeat=datetime.utcnow(),
+            status="active"
+        )
+        db.add(user_session)
+        db.commit()
+    except Exception as exc:
+        logger.warning("Could not persist user session audit record: %s", exc)
+        db.rollback()
 
     company_assignments = db.query(UserCompanyAssignment).filter(UserCompanyAssignment.user_id == user.id).all()
     company_ids = [ca.company_id for ca in company_assignments]
@@ -231,7 +239,31 @@ def update_me(
     if payload.password is not None and payload.password.strip():
         current_user.hashed_password = get_password_hash(payload.password.strip())
 
-    db.commit()
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        err_msg = str(exc).lower()
+        if "too long" in err_msg or "truncation" in err_msg or "avatar_url" in err_msg or "stringdata" in err_msg:
+            try:
+                db.execute(text("ALTER TABLE users ALTER COLUMN avatar_url TYPE TEXT;"))
+                db.commit()
+                # Re-fetch user in clean transaction and retry
+                refreshed_user = db.query(User).filter(User.id == current_user.id).first()
+                if payload.full_name is not None and payload.full_name.strip():
+                    refreshed_user.full_name = payload.full_name.strip()
+                if payload.avatar_url is not None:
+                    refreshed_user.avatar_url = payload.avatar_url.strip() or None
+                if payload.password is not None and payload.password.strip():
+                    refreshed_user.hashed_password = get_password_hash(payload.password.strip())
+                db.commit()
+                current_user = refreshed_user
+            except Exception as auto_exc:
+                logger.error("Auto-migration of avatar_url failed: %s", auto_exc)
+                raise exc
+        else:
+            raise exc
+
     db.refresh(current_user)
 
     company_assignments = db.query(UserCompanyAssignment).filter(UserCompanyAssignment.user_id == current_user.id).all()

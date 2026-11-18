@@ -98,20 +98,63 @@ def _verify_engine(candidate_engine, display_url: str):
     return candidate_engine
 
 
+def ensure_schema_compatibility(engine_instance):
+    """
+    Ensure existing tables have TEXT columns for large data URIs and flexible IPs.
+    In PostgreSQL, ALTER COLUMN TYPE TEXT expands existing VARCHAR columns safely without data loss.
+    Each statement executes in an isolated block so individual table states don't block others.
+    """
+    url_str = str(engine_instance.url)
+    if "postgresql" not in url_str and "postgres" not in url_str:
+        return
+
+    statements = [
+        "ALTER TABLE companies ALTER COLUMN logo_url TYPE TEXT;",
+        "ALTER TABLE users ALTER COLUMN avatar_url TYPE TEXT;",
+        "ALTER TABLE user_sessions ALTER COLUMN ip_address TYPE TEXT;",
+        "ALTER TABLE attachments ALTER COLUMN file_path TYPE TEXT;",
+    ]
+
+    for stmt in statements:
+        try:
+            with engine_instance.begin() as conn:
+                conn.execute(text(stmt))
+                logger.info("Schema compatibility updated: %s", stmt)
+        except Exception as exc:
+            # Table might not exist yet or column is already TEXT
+            logger.debug("Schema compatibility note (%s): %s", stmt, exc)
+
+
 target_url = normalize_database_url(settings.DATABASE_URL)
 sanitized_display = sanitize_database_url(target_url)
 logger.info("Configuring database connection: %s", sanitized_display)
 
+allow_fallback = getattr(settings, "ALLOW_SQLITE_FALLBACK", False)
+if isinstance(allow_fallback, str):
+    allow_fallback = allow_fallback.lower() in ("true", "1", "yes")
+
 try:
     engine = _verify_engine(create_configured_engine(target_url), sanitized_display)
 except Exception as exc:
-    logger.error(
-        "Could not connect to PostgreSQL (%s): %s. "
-        "Set a valid DATABASE_URL in backend/.env.",
-        sanitized_display,
-        exc,
-    )
-    raise
+    if allow_fallback or target_url.startswith("sqlite"):
+        sqlite_fallback = "sqlite:///./avd_crm.db"
+        logger.warning(
+            "Could not connect to primary database (%s): %s. Falling back to local SQLite: %s",
+            sanitized_display,
+            exc,
+            sqlite_fallback,
+        )
+        engine = _verify_engine(create_configured_engine(sqlite_fallback), sqlite_fallback)
+    else:
+        logger.error(
+            "Could not connect to PostgreSQL (%s): %s. "
+            "Set a valid DATABASE_URL in backend/.env.",
+            sanitized_display,
+            exc,
+        )
+        raise
+
+ensure_schema_compatibility(engine)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
