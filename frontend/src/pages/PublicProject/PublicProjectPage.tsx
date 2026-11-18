@@ -52,9 +52,9 @@ export const PublicProjectPage: React.FC = () => {
   const priorityColor = (PRIORITY_CONFIG as Record<string, any>)[project.priority] || PRIORITY_CONFIG['Medium'];
 
   return (
-    <div className="min-h-screen bg-[#EBE5E5] flex flex-col">
+    <div className="h-screen bg-[#EBE5E5] flex flex-col overflow-hidden">
       {/* Public Header */}
-      <header className="bg-[#FFFFFF] border-b border-[#E1DCDC] px-6 py-3.5 flex items-center justify-between shadow-xs">
+      <header className="flex-shrink-0 bg-[#FFFFFF] border-b border-[#E1DCDC] px-6 py-3.5 flex items-center justify-between shadow-xs">
         <div className="flex items-center space-x-3">
           <img
             src="/logos/1.png"
@@ -73,7 +73,7 @@ export const PublicProjectPage: React.FC = () => {
       </header>
 
       {/* Main Public Content */}
-      <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 space-y-6">
+      <main className="flex-1 overflow-y-auto max-w-5xl w-full mx-auto p-4 sm:p-6 space-y-6">
         {/* Project Header Banner */}
         <section className="bg-[#FFFFFF] rounded-2xl p-6 border border-[#E1DCDC] shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

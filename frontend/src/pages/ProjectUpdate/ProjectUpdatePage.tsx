@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { 
-  ArrowLeft, 
-  Save, 
-  X, 
-  Plus, 
-  Trash2, 
-  CheckCircle, 
+import {
+  ArrowLeft,
+  Save,
+  X,
+  Plus,
+  Trash2,
+  CheckCircle,
   CheckCircle2,
-  Calendar, 
+  Calendar,
   AlertCircle,
   Building2,
   Users,
@@ -17,7 +17,9 @@ import {
   Edit2,
   Sliders,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Layers,
+  ExternalLink
 } from 'lucide-react';
 import { GlobalNavbar } from '../../components/navigation/GlobalNavbar';
 import { BackToTop } from '../../components/navigation/BackToTop';
@@ -74,10 +76,17 @@ export const ProjectUpdatePage: React.FC = () => {
   const [assignedEmployeeIds, setAssignedEmployeeIds] = useState<number[]>([]);
   const [selectedEmpToAdd, setSelectedEmpToAdd] = useState<number | ''>('');
 
-  // Module Work Breakdown Structure (Pre-loaded with all existing modules, only name shown)
+  // Module Work Breakdown Structure
   const [modules, setModules] = useState<ModuleEditable[]>([]);
   const [tempModName, setTempModName] = useState('');
+  const [tempModDesc, setTempModDesc] = useState('');
   const modulesScrollRef = useRef<HTMLDivElement>(null);
+
+  // Module Detail & Edit Modal state (to open module on click)
+  const [selectedModuleIdx, setSelectedModuleIdx] = useState<number | null>(null);
+  const [editingModule, setEditingModule] = useState<ModuleEditable | null>(null);
+  const [moduleUpdates, setModuleUpdates] = useState<any[]>([]);
+  const [loadingUpdates, setLoadingUpdates] = useState(false);
 
   // Users list
   const [usersList, setUsersList] = useState<User[]>([]);
@@ -200,7 +209,7 @@ export const ProjectUpdatePage: React.FC = () => {
       ...prev,
       {
         name: tempModName.trim(),
-        description: '',
+        description: tempModDesc.trim(),
         assigned_to_id: defaultAssignee,
         status: 'Not Started',
         priority: 'Medium',
@@ -208,6 +217,7 @@ export const ProjectUpdatePage: React.FC = () => {
       },
     ]);
     setTempModName('');
+    setTempModDesc('');
 
     // Smoothly scroll to the newly appended module
     setTimeout(() => {
@@ -217,14 +227,81 @@ export const ProjectUpdatePage: React.FC = () => {
     }, 120);
   };
 
-  const handleRemoveModule = (index: number) => {
-    const mod = modules[index];
-    setModules(prev => prev.filter((_, i) => i !== index));
-    toast.info('Module Removed', `Module '${mod.name}' removed from breakdown.`);
+  // Open module modal handler
+  const handleOpenModule = async (idx: number) => {
+    const mod = modules[idx];
+    if (!mod) return;
+    setSelectedModuleIdx(idx);
+    setEditingModule({ ...mod });
+    setModuleUpdates([]);
+    if (mod.id) {
+      setLoadingUpdates(true);
+      try {
+        const upds = await api.getModuleUpdates(mod.id);
+        setModuleUpdates(upds);
+      } catch (e) {
+        console.error('Failed to load module updates:', e);
+      } finally {
+        setLoadingUpdates(false);
+      }
+    }
   };
 
-  const handleModuleNameChange = (index: number, newName: string) => {
-    setModules(prev => prev.map((m, i) => i === index ? { ...m, name: newName } : m));
+  const handleCloseModuleModal = () => {
+    setSelectedModuleIdx(null);
+    setEditingModule(null);
+    setModuleUpdates([]);
+  };
+
+  const handleSaveModuleModal = () => {
+    if (selectedModuleIdx === null || !editingModule) return;
+    if (!editingModule.name.trim()) {
+      toast.error('Validation Error', 'Module name cannot be empty.');
+      return;
+    }
+    setModules(prev => prev.map((m, i) => i === selectedModuleIdx ? {
+      ...editingModule,
+      name: editingModule.name.trim(),
+      description: editingModule.description.trim()
+    } : m));
+    toast.success('Module Updated', `Changes applied to '${editingModule.name}'.`);
+    handleCloseModuleModal();
+  };
+
+  // Fully functional delete handler for cross icon
+  const handleRemoveModule = async (index: number, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    const mod = modules[index];
+    if (!mod) return;
+
+    if (mod.id) {
+      if (!confirm(`Are you sure you want to delete module "${mod.name}"?`)) {
+        return;
+      }
+      try {
+        await api.deleteModule(mod.id);
+        setModules(prev => prev.filter((_, i) => i !== index));
+        toast.success('Module Deleted', `Module '${mod.name}' deleted successfully.`);
+        if (selectedModuleIdx === index) {
+          handleCloseModuleModal();
+        }
+      } catch (err: any) {
+        // Fallback: still remove from local state so saving project will soft-delete it
+        setModules(prev => prev.filter((_, i) => i !== index));
+        toast.info('Module Removed', `Module '${mod.name}' removed from breakdown.`);
+        if (selectedModuleIdx === index) {
+          handleCloseModuleModal();
+        }
+      }
+    } else {
+      setModules(prev => prev.filter((_, i) => i !== index));
+      toast.info('Module Removed', `Module '${mod.name}' removed from breakdown.`);
+      if (selectedModuleIdx === index) {
+        handleCloseModuleModal();
+      }
+    }
   };
 
   const handleDiscard = () => {
@@ -321,10 +398,10 @@ export const ProjectUpdatePage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#EBE5E5] flex flex-col">
+    <div className="h-screen bg-[#EBE5E5] flex flex-col overflow-hidden">
       <GlobalNavbar />
 
-      <main className="flex-1 w-full max-w-[1600px] mx-auto px-4 sm:px-6 py-4 space-y-5">
+      <main className="flex-1 overflow-y-auto w-full max-w-[1600px] mx-auto px-4 sm:px-6 py-3 space-y-4">
         {/* Top Header & Breadcrumb */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center space-x-2">
@@ -359,7 +436,7 @@ export const ProjectUpdatePage: React.FC = () => {
           </div>
         )}
 
-        {/* Structured Two-Column Layout (Matching Create Project UI) */}
+        {/* Structured Two-Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
           {/* LEFT 2 COLUMNS: Project Information + Employee Allocation + Modules */}
           <div className="lg:col-span-2 space-y-5">
@@ -508,7 +585,7 @@ export const ProjectUpdatePage: React.FC = () => {
               </div>
             </div>
 
-            {/* Card 2: Module Work Breakdown Structure (ONLY module names, 5 visible left-to-right, then scrollable) */}
+            {/* Card 2: Module Work Breakdown Structure */}
             <div className="bg-[#FFFFFF] rounded-[14px] p-5 border border-[#E1DCDC] shadow-xs space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#E1DCDC] pb-3">
                 <div>
@@ -516,7 +593,7 @@ export const ProjectUpdatePage: React.FC = () => {
                     Module Work Breakdown Structure
                   </h3>
                   <p className="text-[11px] text-[#888888] mt-0.5">
-                    Previously available modules (showing module names, 5 visible left to right, after that scrollable).
+                    Click any module to open and configure details. Scroll horizontally to view all modules.
                   </p>
                 </div>
 
@@ -548,37 +625,57 @@ export const ProjectUpdatePage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Module Input Row: Add New Module Stream */}
-              <div className="flex items-center space-x-2 bg-[#F5F3F4] p-2.5 rounded-[10px] border border-[#E1DCDC]">
-                <input
-                  type="text"
-                  value={tempModName}
-                  onChange={e => setTempModName(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleAddModule();
-                    }
-                  }}
-                  placeholder="Enter module name to add (e.g. Distributed Consensus Engine)..."
-                  className="flex-1 h-[36px] bg-white border border-[#E1DCDC] rounded-[8px] px-3.5 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] font-medium"
-                />
+              {/* Module Input Row: Name, Description, and [Add Stream] button in one horizontal row */}
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5 bg-[#F5F3F4] p-2.5 rounded-[10px] border border-[#E1DCDC]">
+                <div className="md:col-span-5">
+                  <input
+                    type="text"
+                    value={tempModName}
+                    onChange={e => setTempModName(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddModule();
+                      }
+                    }}
+                    placeholder="Enter module name to add..."
+                    className="w-full h-[36px] bg-white border border-[#E1DCDC] rounded-[8px] px-3 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] font-medium"
+                  />
+                </div>
 
-                <button
-                  type="button"
-                  onClick={handleAddModule}
-                  disabled={!tempModName.trim()}
-                  className="h-[36px] px-4 rounded-[8px] bg-[#0A0A0A] text-white hover:bg-[#333333] disabled:bg-[#E8E4E4] disabled:text-[#888888] disabled:cursor-not-allowed text-xs font-semibold flex items-center justify-center space-x-1 transition-colors flex-shrink-0"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Add Stream</span>
-                </button>
+                <div className="md:col-span-5">
+                  <input
+                    type="text"
+                    value={tempModDesc}
+                    onChange={e => setTempModDesc(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddModule();
+                      }
+                    }}
+                    placeholder="Enter module description..."
+                    className="w-full h-[36px] bg-white border border-[#E1DCDC] rounded-[8px] px-3 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] font-medium"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <button
+                    type="button"
+                    onClick={handleAddModule}
+                    disabled={!tempModName.trim()}
+                    className="w-full h-[36px] rounded-[8px] bg-[#0A0A0A] text-white hover:bg-[#333333] disabled:bg-[#E8E4E4] disabled:text-[#888888] disabled:cursor-not-allowed text-xs font-semibold flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Stream</span>
+                  </button>
+                </div>
               </div>
 
-              {/* MODULES DISPLAY: ONLY MODULE NAMES, 5 VISIBLE LEFT TO RIGHT, THEN SCROLLABLE */}
+              {/* MODULES DISPLAY: ROW-WISE LIST, CLICK TO OPEN, FUNCTIONAL CROSS TO DELETE */}
               {modules.length === 0 ? (
                 <div className="p-6 rounded-[10px] bg-[#F5F3F4]/50 border border-dashed border-[#E1DCDC] text-center text-xs text-[#888888]">
-                  No modules linked yet. Enter a module name above to add.
+                  No modules linked yet. Enter module name and description above to add.
                 </div>
               ) : (
                 <div className="relative">
@@ -590,30 +687,49 @@ export const ProjectUpdatePage: React.FC = () => {
                     {modules.map((m, idx) => (
                       <div
                         key={m.id ? `mod-${m.id}` : `new-mod-${idx}`}
-                        className="flex-none w-[calc((100%-48px)/5)] min-w-[185px] h-[52px] px-3.5 py-2.5 rounded-[12px] bg-[#F5F3F4] border border-[#E1DCDC] hover:border-[#0A0A0A] transition-all flex items-center justify-between space-x-2 shadow-2xs group"
+                        onClick={() => handleOpenModule(idx)}
+                        className="flex-none w-[calc((100%-48px)/5)] min-w-[195px] h-[54px] px-3.5 py-2 rounded-[12px] bg-[#F5F3F4] hover:bg-[#ECE8E8] border border-[#E1DCDC] hover:border-[#0A0A0A] transition-all flex items-center justify-between space-x-2 shadow-2xs group cursor-pointer"
+                        title="Click to open module details"
                       >
-                        {/* Module Name (editable inline, only name shown) */}
-                        <div className="flex items-center space-x-2 min-w-0 flex-1">
-                          <div className="w-2 h-2 rounded-full bg-[#5269A8] flex-shrink-0" />
-                          <input
-                            type="text"
-                            value={m.name}
-                            onChange={e => handleModuleNameChange(idx, e.target.value)}
-                            placeholder="Module Name"
-                            className="w-full bg-transparent text-xs font-bold text-[#0A0A0A] focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0A0A0A] rounded-[4px] px-1 truncate"
-                            title={m.name}
+                        {/* Module Indicator & Details */}
+                        <div className="flex items-center space-x-2.5 min-w-0 flex-1">
+                          <div
+                            className={`w-2 h-2 rounded-full flex-shrink-0 ${m.status === 'Closed'
+                              ? 'bg-[#43866B]'
+                              : m.status === 'In Progress'
+                                ? 'bg-[#5269A8]'
+                                : m.status === 'Review'
+                                  ? 'bg-[#B65F65]'
+                                  : 'bg-[#A78645]'
+                              }`}
                           />
+                          <div className="min-w-0 flex-1">
+                            <span className="block text-xs font-bold text-[#0A0A0A] truncate">
+                              {m.name || 'Untitled Module'}
+                            </span>
+                            <span className="block text-[10px] text-[#888888] truncate">
+                              {m.description ? m.description : (m.status || 'No description')}
+                            </span>
+                          </div>
                         </div>
 
-                        {/* Remove module button */}
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveModule(idx)}
-                          className="text-[#888888] hover:text-[#B65F65] p-1 rounded hover:bg-black/5 transition-colors flex-shrink-0 opacity-70 group-hover:opacity-100"
-                          title="Remove module"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
+                        {/* Actions: Open Indicator & Remove button */}
+                        <div className="flex items-center space-x-1 flex-shrink-0">
+                          <span className="text-[10px] font-semibold text-[#5269A8] opacity-0 group-hover:opacity-100 transition-opacity bg-white px-1.5 py-0.5 rounded border border-[#E1DCDC]">
+                            Open
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemoveModule(idx, e);
+                            }}
+                            className="text-[#888888] hover:text-[#B65F65] p-1.5 rounded-full hover:bg-[#F5DEDE] transition-colors flex-shrink-0 cursor-pointer"
+                            title="Delete module"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -625,7 +741,7 @@ export const ProjectUpdatePage: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => scrollModules('left')}
-                          className="text-[#0A0A0A] font-semibold hover:underline"
+                          className="text-[#0A0A0A] font-semibold hover:underline cursor-pointer"
                         >
                           ◀ Previous
                         </button>
@@ -633,7 +749,7 @@ export const ProjectUpdatePage: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => scrollModules('right')}
-                          className="text-[#0A0A0A] font-semibold hover:underline"
+                          className="text-[#0A0A0A] font-semibold hover:underline cursor-pointer"
                         >
                           Next ▶
                         </button>
@@ -645,69 +761,72 @@ export const ProjectUpdatePage: React.FC = () => {
             </div>
           </div>
 
-          {/* RIGHT SIDE SETTINGS PANEL (Priority Slider, Status, Company, Dates) */}
+          {/* RIGHT SIDE SETTINGS PANEL (Status & Company in same row, Dates, Priority, and All 3 Buttons at bottom) */}
           <div className="space-y-5">
-            <div className="bg-[#FFFFFF] rounded-[14px] p-5 border border-[#E1DCDC] shadow-xs space-y-5">
+            <div className="bg-[#FFFFFF] rounded-[14px] p-5 border border-[#E1DCDC] shadow-xs space-y-5 flex flex-col">
               <span className="text-[11px] font-bold uppercase text-[#888888] tracking-wider block border-b border-[#E1DCDC] pb-2">
                 Project Settings & Governance
               </span>
 
-              {/* Project Lifecycle Status */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-xs font-semibold text-[#333333]">
-                    Project Lifecycle Status
-                  </label>
-                  <span
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getStatusBadgeStyle(status)}`}
-                  >
-                    {status}
-                  </span>
-                </div>
-                <select
-                  value={status}
-                  onChange={e => setStatus(e.target.value)}
-                  className="w-full bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] px-2.5 py-2 text-xs font-bold text-[#0A0A0A] focus:outline-none focus:border-[#0A0A0A] cursor-pointer"
-                >
-                  {PROJECT_STATUS_OPTIONS.map(opt => (
-                    <option key={opt} value={opt}>
-                      {opt}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Company Domain */}
-              <div>
-                <label className="block text-xs font-semibold text-[#333333] mb-1.5">
-                  Sub-Company Domain
-                </label>
-                <div className="flex items-center space-x-2.5 bg-[#F5F3F4] p-2.5 rounded-[10px] border border-[#E1DCDC]">
-                  {currentCompany?.logo_url && (
-                    <img
-                      src={currentCompany.logo_url}
-                      alt={currentCompany.name}
-                      className="w-7 h-7 rounded-[4px] object-contain bg-white p-0.5 border border-[#E1DCDC]"
-                    />
-                  )}
+              {/* Project Lifecycle Status and Company Name IN THE SAME ROW */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Project Lifecycle Status */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-semibold text-[#333333]">
+                      Lifecycle Status
+                    </label>
+                    <span
+                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${getStatusBadgeStyle(status)}`}
+                    >
+                      {status}
+                    </span>
+                  </div>
                   <select
-                    disabled={isManager}
-                    value={companyId}
-                    onChange={e => setCompanyId(Number(e.target.value))}
-                    className="flex-1 bg-transparent text-xs font-bold text-[#0A0A0A] focus:outline-none cursor-pointer"
+                    value={status}
+                    onChange={e => setStatus(e.target.value)}
+                    className="w-full h-[38px] bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] px-2 text-xs font-bold text-[#0A0A0A] focus:outline-none focus:border-[#0A0A0A] cursor-pointer"
                   >
-                    {companies.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({c.code})
+                    {PROJECT_STATUS_OPTIONS.map(opt => (
+                      <option key={opt} value={opt}>
+                        {opt}
                       </option>
                     ))}
                   </select>
                 </div>
-                {isManager && (
-                  <p className="text-[10px] text-[#888888] mt-1">
-                    🔒 Restricted to assigned company scope.
-                  </p>
-                )}
+
+                {/* Sub-Company Domain (Company Name) */}
+                <div>
+                  <label className="block text-xs font-semibold text-[#333333] mb-1.5">
+                    Company Name
+                  </label>
+                  <div className="flex items-center space-x-2 bg-[#F5F3F4] px-2.5 h-[38px] rounded-[10px] border border-[#E1DCDC]">
+                    {currentCompany?.logo_url && (
+                      <img
+                        src={currentCompany.logo_url}
+                        alt={currentCompany.name}
+                        className="w-5 h-5 rounded-[4px] object-contain bg-white p-0.5 border border-[#E1DCDC] flex-shrink-0"
+                      />
+                    )}
+                    <select
+                      disabled={isManager}
+                      value={companyId}
+                      onChange={e => setCompanyId(Number(e.target.value))}
+                      className="flex-1 bg-transparent text-xs font-bold text-[#0A0A0A] focus:outline-none cursor-pointer truncate"
+                    >
+                      {companies.map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {isManager && (
+                    <p className="text-[10px] text-[#888888] mt-1">
+                      🔒 Assigned scope.
+                    </p>
+                  )}
+                </div>
               </div>
 
               {/* Execution Timeline (Commencement & Target Deadline Dates) */}
@@ -779,11 +898,10 @@ export const ProjectUpdatePage: React.FC = () => {
                           className="flex flex-col items-center focus:outline-none group cursor-pointer"
                         >
                           <div
-                            className={`w-5 h-5 rounded-full flex items-center justify-center transition-all ${
-                              isSelected
-                                ? 'scale-125 ring-3 ring-offset-1 shadow-sm'
-                                : 'bg-white border-2 border-[#E1DCDC] hover:scale-110'
-                            }`}
+                            className={`w-5 h-5 rounded-full flex items-center justify-center transition-all ${isSelected
+                              ? 'scale-125 ring-3 ring-offset-1 shadow-sm'
+                              : 'bg-white border-2 border-[#E1DCDC] hover:scale-110'
+                              }`}
                             style={{
                               backgroundColor: isSelected ? pt.color : '#FFFFFF',
                               borderColor: isSelected ? pt.color : '#C5BFBF',
@@ -793,9 +911,8 @@ export const ProjectUpdatePage: React.FC = () => {
                             {isSelected && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
                           </div>
                           <span
-                            className={`text-[11px] mt-2 font-semibold transition-colors ${
-                              isSelected ? 'font-bold' : 'text-[#888888] group-hover:text-[#333333]'
-                            }`}
+                            className={`text-[11px] mt-2 font-semibold transition-colors ${isSelected ? 'font-bold' : 'text-[#888888] group-hover:text-[#333333]'
+                              }`}
                             style={{ color: isSelected ? pt.color : undefined }}
                           >
                             {pt.label}
@@ -806,54 +923,266 @@ export const ProjectUpdatePage: React.FC = () => {
                   </div>
                 </div>
               </div>
+
+              {/* ALL 3 BUTTONS AT THE BOTTOM OF RIGHT PANEL */}
+              <div className="border-t border-[#E1DCDC] pt-4 space-y-2.5 mt-2">
+                {/* Button 1: Complete Project Option */}
+                {status !== 'Closed' ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsCompleteModalOpen(true)}
+                    className="w-full py-2.5 px-4 rounded-[10px] bg-[#43866B] hover:bg-[#346d56] text-white text-xs font-bold flex items-center justify-center space-x-1.5 shadow-xs transition-colors cursor-pointer"
+                    title="Transition project to Closed status"
+                  >
+                    <CheckCircle className="w-4 h-4" />
+                    <span>Complete Project</span>
+                  </button>
+                ) : (
+                  <div className="w-full py-2 px-3 rounded-[10px] text-[11px] text-[#43866B] font-bold flex items-center justify-center space-x-2 bg-[#E8F3EE] border border-[#43866B]/20">
+                    <CheckCircle className="w-3.5 h-3.5" />
+                    <span>Project is Closed</span>
+                  </div>
+                )}
+
+                {/* Buttons 2 & 3: Discard Changes and Save & Update Project */}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDiscard}
+                    className="w-full py-2.5 px-2 rounded-[10px] border border-[#E1DCDC] text-xs font-semibold text-[#666666] hover:bg-[#F5F3F4] transition-colors text-center cursor-pointer truncate"
+                  >
+                    Discard Changes
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={handleSaveProject}
+                    className="w-full py-2.5 px-2 rounded-[10px] bg-[#0A0A0A] text-white text-xs font-bold hover:bg-[#333333] transition-colors shadow-xs flex items-center justify-center space-x-1.5 disabled:opacity-50 cursor-pointer truncate"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span className="truncate">{isSubmitting ? 'Saving...' : 'Save & Update'}</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
+      </main>
 
-        {/* BOTTOM SUBMISSION & ACTION BAR */}
-        <div className="bg-[#FFFFFF] rounded-[14px] p-4 border border-[#E1DCDC] shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
-          {/* Left: Complete Project Option */}
-          <div className="flex items-center space-x-3 w-full sm:w-auto justify-between sm:justify-start">
-            {status !== 'Closed' ? (
+      {/* Module Detail & Configuration Modal (Opened when clicking on any module card) */}
+      {editingModule && selectedModuleIdx !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-[#FFFFFF] rounded-[16px] shadow-2xl border border-[#E1DCDC] w-full max-w-xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="px-5 py-4 border-b border-[#E1DCDC] bg-[#F5F3F4] flex items-center justify-between">
+              <div className="flex items-center space-x-2.5 truncate">
+                <div className="p-1.5 rounded-[8px] bg-white border border-[#E1DCDC] text-[#5269A8]">
+                  <Layers className="w-4 h-4" />
+                </div>
+                <div className="truncate">
+                  <h3 className="text-xs font-bold text-[#0A0A0A] uppercase tracking-wider">
+                    Module Configuration
+                  </h3>
+                  <p className="text-[11px] text-[#888888] truncate max-w-sm">
+                    {editingModule.name || 'Configure Module'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getStatusBadgeStyle(editingModule.status)}`}>
+                  {editingModule.status}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCloseModuleModal}
+                  className="p-1 rounded-[8px] text-[#888888] hover:text-[#0A0A0A] hover:bg-[#E8E4E4] transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto space-y-4">
+              {/* Module Name */}
+              <div>
+                <label className="block text-xs font-semibold text-[#333333] mb-1">
+                  Module Name *
+                </label>
+                <input
+                  type="text"
+                  value={editingModule.name}
+                  onChange={e => setEditingModule({ ...editingModule, name: e.target.value })}
+                  placeholder="e.g. Distributed Consensus Engine"
+                  className="w-full bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] px-3.5 py-2 text-xs text-[#333333] font-medium focus:outline-none focus:border-[#0A0A0A] focus:bg-white"
+                  required
+                />
+              </div>
+
+              {/* Module Description */}
+              <div>
+                <label className="block text-xs font-semibold text-[#333333] mb-1">
+                  Module Description & Scope
+                </label>
+                <textarea
+                  rows={4}
+                  value={editingModule.description}
+                  onChange={e => setEditingModule({ ...editingModule, description: e.target.value })}
+                  placeholder="Detail module deliverables, technical criteria, and acceptance requirements..."
+                  className="w-full bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] p-3 text-xs text-[#333333] leading-relaxed focus:outline-none focus:border-[#0A0A0A] focus:bg-white resize-none"
+                />
+              </div>
+
+              {/* Two Column: Assignee and Lifecycle Status */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <label className="block text-xs font-semibold text-[#333333] mb-1">
+                    Assigned Owner / Employee
+                  </label>
+                  <select
+                    value={editingModule.assigned_to_id || ''}
+                    onChange={e => setEditingModule({ ...editingModule, assigned_to_id: e.target.value ? Number(e.target.value) : undefined })}
+                    className="w-full bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] px-3 py-2 text-xs text-[#333333] font-medium focus:outline-none focus:border-[#0A0A0A] cursor-pointer"
+                  >
+                    <option value="">Unassigned</option>
+                    {usersList.map(u => (
+                      <option key={u.id} value={u.id}>
+                        {u.full_name} ({u.role_name}) {assignedEmployeeIds.includes(u.id) ? '★' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[#333333] mb-1">
+                    Module Status
+                  </label>
+                  <select
+                    value={editingModule.status}
+                    onChange={e => setEditingModule({ ...editingModule, status: e.target.value })}
+                    className="w-full bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] px-3 py-2 text-xs text-[#333333] font-medium focus:outline-none focus:border-[#0A0A0A] cursor-pointer"
+                  >
+                    {PROJECT_STATUS_OPTIONS.map(opt => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Two Column: Priority and Progress Slider */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-center">
+                <div>
+                  <label className="block text-xs font-semibold text-[#333333] mb-1">
+                    Priority Level
+                  </label>
+                  <select
+                    value={editingModule.priority}
+                    onChange={e => setEditingModule({ ...editingModule, priority: e.target.value })}
+                    className="w-full bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] px-3 py-2 text-xs text-[#333333] font-medium focus:outline-none focus:border-[#0A0A0A] cursor-pointer"
+                  >
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                    <option value="Urgent">Urgent</option>
+                  </select>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-[#333333]">
+                      Module Progress
+                    </label>
+                    <span className="text-xs font-bold text-[#0A0A0A]">
+                      {editingModule.progress}%
+                    </span>
+                  </div>
+                  <div className="flex items-center space-x-2 bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] px-3 py-1.5">
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="5"
+                      value={editingModule.progress}
+                      onChange={e => setEditingModule({ ...editingModule, progress: Number(e.target.value) })}
+                      className="w-full accent-[#0A0A0A] cursor-pointer"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Updates History Section if module has an ID and updates exist */}
+              {editingModule.id && (
+                <div className="pt-2 border-t border-[#E1DCDC]">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-[#0A0A0A] uppercase tracking-wider">
+                      Recent Updates & History
+                    </span>
+                    <span className="text-[10px] text-[#888888]">
+                      {loadingUpdates ? 'Loading...' : `${moduleUpdates.length} updates logged`}
+                    </span>
+                  </div>
+
+                  {moduleUpdates.length === 0 ? (
+                    <p className="text-[11px] text-[#888888] italic bg-[#F5F3F4] p-2.5 rounded-[8px]">
+                      No previous updates posted for this module yet.
+                    </p>
+                  ) : (
+                    <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
+                      {moduleUpdates.map((u: any) => (
+                        <div key={u.id} className="p-2.5 rounded-[8px] bg-[#F5F3F4] border border-[#E1DCDC] text-xs">
+                          <div className="flex items-center justify-between text-[10px] text-[#888888] mb-1">
+                            <span className="font-semibold text-[#0A0A0A]">{u.user_name || 'Team Member'}</span>
+                            <span>{u.created_at ? new Date(u.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : ''}</span>
+                          </div>
+                          <p className="text-[#333333] text-[11px] leading-relaxed">{u.description_text}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 py-3 border-t border-[#E1DCDC] bg-[#F5F3F4] flex items-center justify-between">
               <button
                 type="button"
-                onClick={() => setIsCompleteModalOpen(true)}
-                className="px-4 py-2 rounded-[10px] bg-[#43866B] hover:bg-[#346d56] text-white text-xs font-bold flex items-center space-x-1.5 shadow-xs transition-colors"
-                title="Transition project to Closed status"
+                onClick={async () => {
+                  if (selectedModuleIdx !== null) {
+                    await handleRemoveModule(selectedModuleIdx);
+                  }
+                }}
+                className="px-3 py-1.5 rounded-[8px] border border-[#B65F65]/30 text-[#B65F65] hover:bg-[#F5DEDE] text-xs font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer"
               >
-                <CheckCircle className="w-4 h-4" />
-                <span>Complete Project</span>
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Module</span>
               </button>
-            ) : (
-              <div className="text-[11px] text-[#43866B] font-bold flex items-center space-x-2 bg-[#E8F3EE] px-3 py-1.5 rounded-[8px] border border-[#43866B]/20">
-                <CheckCircle className="w-3.5 h-3.5" />
-                <span>Project is Closed</span>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={handleCloseModuleModal}
+                  className="px-3.5 py-1.5 rounded-[8px] border border-[#E1DCDC] text-xs font-semibold text-[#666666] hover:bg-[#E8E4E4] transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveModuleModal}
+                  className="px-4 py-1.5 rounded-[8px] bg-[#0A0A0A] text-white text-xs font-bold hover:bg-[#333333] transition-colors shadow-xs flex items-center space-x-1.5 cursor-pointer"
+                >
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  <span>Apply Changes</span>
+                </button>
               </div>
-            )}
-          </div>
-
-          {/* Right: Discard & Save Project */}
-          <div className="flex items-center space-x-2.5 w-full sm:w-auto justify-end">
-            <button
-              type="button"
-              onClick={handleDiscard}
-              className="px-4 py-2 rounded-[10px] border border-[#E1DCDC] text-xs font-semibold text-[#666666] hover:bg-[#F5F3F4] transition-colors"
-            >
-              Discard Changes
-            </button>
-
-            <button
-              type="button"
-              disabled={isSubmitting}
-              onClick={handleSaveProject}
-              className="px-6 py-2 rounded-[10px] bg-[#0A0A0A] text-white text-xs font-bold hover:bg-[#333333] transition-colors shadow-xs flex items-center space-x-1.5 disabled:opacity-50"
-            >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>{isSubmitting ? 'Saving...' : 'Save & Update Project'}</span>
-            </button>
+            </div>
           </div>
         </div>
-      </main>
+      )}
 
       {/* Complete Project Confirmation Modal */}
       {isCompleteModalOpen && project && (

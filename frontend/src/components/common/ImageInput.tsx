@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect, useId } from 'react';
 import { Upload, Link2, X, Image as ImageIcon, Loader2, AlertCircle, Check } from 'lucide-react';
-import { api } from '../../services/api';
 
 interface ImageInputProps {
   value?: string;
@@ -10,21 +9,70 @@ interface ImageInputProps {
   isAvatar?: boolean;
 }
 
-function dataURLtoFile(dataurl: string, filename: string): File | null {
-  try {
-    const arr = dataurl.split(',');
-    if (arr.length < 2) return null;
-    const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/png';
-    const bstr = atob(arr[1]);
-    let n = bstr.length;
-    const u8arr = new Uint8Array(n);
-    while (n--) {
-      u8arr[n] = bstr.charCodeAt(n);
+/**
+ * Converts a selected image File into an optimized Base64 Data URI directly in the browser.
+ * - SVGs: Read directly via FileReader as Data URL.
+ * - Bitmaps (PNG, JPG, WEBP, etc.): Resized via HTML5 Canvas (max 256x256 for avatars, 512x512 for logos)
+ *   to ensure crisp display while keeping the database payload small (~15-50KB).
+ */
+export function fileToOptimizedDataUrl(file: File, isAvatar: boolean = false): Promise<string> {
+  return new Promise((resolve, reject) => {
+    // If SVG, read directly as data URL without rasterizing to canvas
+    if (file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg')) {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Failed to read SVG file.'));
+      reader.readAsDataURL(file);
+      return;
     }
-    return new File([u8arr], filename, { type: mime });
-  } catch {
-    return null;
-  }
+
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Failed to read image file.'));
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Failed to load image into memory.'));
+      img.onload = () => {
+        const maxDim = isAvatar ? 256 : 512;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, width);
+        canvas.height = Math.max(1, height);
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          // Fallback to original data URL if canvas 2d context is unavailable
+          resolve(reader.result as string);
+          return;
+        }
+
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // For PNG or files likely with transparency, use image/png.
+        // For JPEG/others, use image/jpeg with 0.88 quality for optimal compression.
+        const hasAlpha = file.type === 'image/png' || file.type === 'image/webp';
+        const format = hasAlpha ? 'image/png' : 'image/jpeg';
+        const quality = 0.88;
+        const dataUrl = canvas.toDataURL(format, quality);
+        resolve(dataUrl);
+      };
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 export const ImageInput: React.FC<ImageInputProps> = ({
@@ -39,7 +87,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({
 
   const [mode, setMode] = useState<'upload' | 'url'>('upload');
   const [urlInput, setUrlInput] = useState(value || '');
-  const [isUploading, setIsUploading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [imgLoadError, setImgLoadError] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -88,16 +136,17 @@ export const ImageInput: React.FC<ImageInputProps> = ({
       return;
     }
 
-    setIsUploading(true);
+    setIsProcessing(true);
     try {
-      const res = await api.uploadImage(file);
-      onChange(res.url);
-      setUrlInput(res.url);
+      // Convert to optimized Base64 Data URI directly so it saves to the database
+      const dataUrl = await fileToOptimizedDataUrl(file, isAvatar);
+      onChange(dataUrl);
+      setUrlInput(dataUrl);
       setImgLoadError(false);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to upload image. Please try again.');
+      setErrorMsg(err.message || 'Failed to process image. Please try again.');
     } finally {
-      setIsUploading(false);
+      setIsProcessing(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -118,24 +167,12 @@ export const ImageInput: React.FC<ImageInputProps> = ({
       return;
     }
 
-    // If it's a base64 data URI, auto-upload it to avoid oversized DB columns
+    // If it's a base64 data URI, accept it directly into the database
     if (trimmed.startsWith('data:image/')) {
-      const file = dataURLtoFile(trimmed, `uploaded_image_${Date.now()}.png`);
-      if (file) {
-        setIsUploading(true);
-        try {
-          const res = await api.uploadImage(file);
-          onChange(res.url);
-          setUrlInput(res.url);
-          setImgLoadError(false);
-          return;
-        } catch (err: any) {
-          setErrorMsg(err.message || 'Failed to process base64 image data.');
-          return;
-        } finally {
-          setIsUploading(false);
-        }
-      }
+      onChange(trimmed);
+      setUrlInput(trimmed);
+      setImgLoadError(false);
+      return;
     }
 
     // Validation: allow relative paths (/logos/..., /uploads/..., etc.) or standard HTTP(S)
@@ -196,7 +233,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({
             </div>
           )}
 
-          {isUploading && (
+          {isProcessing && (
             <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
               <Loader2 className="w-5 h-5 text-white animate-spin" />
             </div>
@@ -265,13 +302,14 @@ export const ImageInput: React.FC<ImageInputProps> = ({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="cursor-pointer px-3 py-1.5 rounded-[8px] bg-white border border-[#E1DCDC] hover:border-[#0A0A0A] text-xs font-medium text-[#333333] flex items-center space-x-1.5 shadow-2xs transition-colors"
+                disabled={isProcessing}
+                className="cursor-pointer px-3 py-1.5 rounded-[8px] bg-white border border-[#E1DCDC] hover:border-[#0A0A0A] text-xs font-medium text-[#333333] flex items-center space-x-1.5 shadow-2xs transition-colors disabled:opacity-50"
               >
                 <Upload className="w-3.5 h-3.5 text-[#5269A8]" />
-                <span>{value ? 'Change Selected Image' : 'Choose Local File...'}</span>
+                <span>{value ? 'Change Selected Image' : 'Choose Image File...'}</span>
               </button>
               <span className="text-[11px] text-[#888888] truncate">
-                PNG, JPG, WEBP, SVG (Max 10MB)
+                PNG, JPG, WEBP, SVG (Saved in DB)
               </span>
             </div>
           )}
@@ -282,10 +320,10 @@ export const ImageInput: React.FC<ImageInputProps> = ({
               <input
                 type="text"
                 placeholder="https://... or /logos/1.png"
-                value={urlInput}
+                value={urlInput.startsWith('data:') ? 'data:image/... [Embedded DB Image]' : urlInput}
                 onChange={e => handleUrlInputChange(e.target.value)}
                 onBlur={() => {
-                  if (urlInput.trim() && urlInput.trim() !== value) {
+                  if (urlInput.trim() && urlInput.trim() !== value && !urlInput.startsWith('data:')) {
                     handleApplyUrl();
                   }
                 }}
@@ -311,7 +349,10 @@ export const ImageInput: React.FC<ImageInputProps> = ({
           {/* Current URL indicator */}
           {value && (
             <p className="text-[10px] text-[#888888] truncate max-w-sm">
-              Current: <span className="font-mono text-[#555555]">{value}</span>
+              Current:{' '}
+              <span className="font-mono text-[#555555]">
+                {value.startsWith('data:') ? 'Embedded Image (Stored in DB)' : value}
+              </span>
             </p>
           )}
 

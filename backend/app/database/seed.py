@@ -28,11 +28,16 @@ from app.services.project_service import calculate_and_update_project_progress
 logger = logging.getLogger("avd.database")
 
 
+# Database migration helper removed
+
 def seed_database():
     Base.metadata.create_all(bind=engine)
     db: Session = SessionLocal()
 
     try:
+        # Migrate any previously uploaded disk images to DB data URIs
+        migrate_local_images_to_db(db)
+
         if db.query(User).first():
             logger.info("Users already exist. Skipping initial seed.")
             return
