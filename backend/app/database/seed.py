@@ -22,7 +22,7 @@ from app.models.all_models import (
     ProjectEmployeeAssignment
 )
 from app.core.security import get_password_hash
-from app.core.config import settings
+from ..core.config import settings
 from app.services.project_service import calculate_and_update_project_progress
 
 logger = logging.getLogger("avd.database")

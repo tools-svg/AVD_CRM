@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.core.config import settings
+from backend.app.core.config import settings
 from app.database.session import (
     Base,
     engine,
