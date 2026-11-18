@@ -5,7 +5,7 @@ import io
 import aiofiles
 from PIL import Image
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
-from ..core.config import settings
+from app.core.config import settings
 from app.models.all_models import User
 from app.permissions.deps import get_current_user
 

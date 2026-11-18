@@ -1,6 +1,8 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from app.database.session import get_db
 from app.models.all_models import (
     User, 
@@ -147,7 +149,26 @@ def update_user(
             v = v.strip() or None
         setattr(user, k, v)
 
-    db.commit()
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        err_msg = str(exc).lower()
+        if "too long" in err_msg or "truncation" in err_msg or "avatar_url" in err_msg or "stringdata" in err_msg:
+            try:
+                db.execute(text("ALTER TABLE users ALTER COLUMN avatar_url TYPE TEXT;"))
+                db.commit()
+                user = db.query(User).filter(User.id == user_id).first()
+                for k, v in update_data.items():
+                    if k == "avatar_url" and isinstance(v, str):
+                        v = v.strip() or None
+                    setattr(user, k, v)
+                db.commit()
+            except Exception:
+                raise exc
+        else:
+            raise exc
+
     db.refresh(user)
 
     db.add(ActivityLog(

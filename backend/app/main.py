@@ -8,13 +8,14 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy.exc import SQLAlchemyError
 
-from backend.app.core.config import settings
+from app.core.config import settings
 from app.database.session import (
     Base,
     engine,
     get_missing_tables,
     get_existing_tables,
     sanitized_display,
+    ensure_schema_compatibility,
 )
 import app.models.all_models 
 from app.database.seed import seed_database
@@ -47,6 +48,7 @@ if not logger.handlers:
 try:
     logger.info("Initializing database schema on %s", sanitized_display)
     Base.metadata.create_all(bind=engine)
+    ensure_schema_compatibility(engine)
     missing = get_missing_tables()
     if missing:
         logger.error("Required tables are still missing after create_all: %s", missing)

@@ -2,8 +2,11 @@ import os
 import shutil
 import logging
 import datetime
+import base64
+import io
+from typing import Optional
 from sqlalchemy.orm import Session
-from app.database.session import SessionLocal, Base, engine
+from app.database.session import SessionLocal, Base, engine, ensure_schema_compatibility
 from app.models.all_models import (
     Role,
     Company,
@@ -22,16 +25,125 @@ from app.models.all_models import (
     ProjectEmployeeAssignment
 )
 from app.core.security import get_password_hash
-from ..core.config import settings
+from app.core.config import settings
 from app.services.project_service import calculate_and_update_project_progress
 
 logger = logging.getLogger("avd.database")
 
 
-# Database migration helper removed
+def resolve_image_file(rel_path: str) -> Optional[str]:
+    """Find an image file on disk from relative paths like /logos/1.png or /uploads/..."""
+    if not rel_path or rel_path.startswith("data:image/"):
+        return None
+
+    clean = rel_path.lstrip("/\\")
+    backend_app_dir = os.path.dirname(os.path.abspath(__file__))
+    backend_dir = os.path.abspath(os.path.join(backend_app_dir, "..", ".."))
+    root_dir = os.path.abspath(os.path.join(backend_dir, ".."))
+
+    candidates = [
+        rel_path,
+        clean,
+        os.path.join(settings.UPLOAD_DIR, os.path.basename(clean)),
+        os.path.join(backend_dir, "uploads", os.path.basename(clean)),
+        os.path.join(root_dir, "frontend", "public", clean),
+        os.path.join(root_dir, "frontend", "public", "logos", os.path.basename(clean)),
+        os.path.join(root_dir, "frontend", "dist", clean),
+        os.path.join(root_dir, "frontend", "dist", "logos", os.path.basename(clean)),
+        os.path.join("/usr/share/nginx/html", clean),
+        os.path.join("/usr/share/nginx/html", "logos", os.path.basename(clean)),
+        os.path.join("/app", "uploads", os.path.basename(clean)),
+    ]
+
+    for cand in candidates:
+        if cand and os.path.isfile(cand):
+            return cand
+    return None
+
+
+def image_to_base64_data_uri(image_path_or_url: str) -> Optional[str]:
+    """
+    Converts a local disk image path or relative image URL into a self-contained
+    Base64 Data URI so it can be stored directly in the database and rendered
+    by any client on any machine.
+    """
+    if not image_path_or_url:
+        return None
+    if image_path_or_url.startswith("data:image/"):
+        return image_path_or_url
+
+    local_path = resolve_image_file(image_path_or_url)
+    if not local_path:
+        return None
+
+    try:
+        ext = os.path.splitext(local_path)[1].lower()
+        with open(local_path, "rb") as f:
+            contents = f.read()
+        if not contents:
+            return None
+
+        if ext == ".svg":
+            b64_str = base64.b64encode(contents).decode("utf-8")
+            return f"data:image/svg+xml;base64,{b64_str}"
+
+        try:
+            from PIL import Image
+            img = Image.open(io.BytesIO(contents))
+            img.thumbnail((512, 512), Image.Resampling.LANCZOS)
+            out_buf = io.BytesIO()
+            if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                img.save(out_buf, format="PNG", optimize=True)
+                mime = "image/png"
+            else:
+                img.convert("RGB").save(out_buf, format="JPEG", quality=85, optimize=True)
+                mime = "image/jpeg"
+            b64_str = base64.b64encode(out_buf.getvalue()).decode("utf-8")
+            return f"data:{mime};base64,{b64_str}"
+        except Exception:
+            b64_str = base64.b64encode(contents).decode("utf-8")
+            mime = "image/png" if ext == ".png" else "image/jpeg"
+            return f"data:{mime};base64,{b64_str}"
+    except Exception as exc:
+        logger.warning("Failed to encode %s to base64 data URI: %s", local_path, exc)
+        return None
+
+
+def migrate_local_images_to_db(db: Session):
+    """
+    Migrates any disk/path-based logos and avatars in the database to base64 Data URIs
+    so they persist directly in the DB and display everywhere.
+    """
+    try:
+        updated = False
+        companies = db.query(Company).all()
+        for comp in companies:
+            if comp.logo_url and not comp.logo_url.startswith("data:image/"):
+                data_uri = image_to_base64_data_uri(comp.logo_url)
+                if data_uri:
+                    comp.logo_url = data_uri
+                    updated = True
+                    logger.info("Migrated logo to DB data URI for company '%s' (%s)", comp.name, comp.code)
+
+        users = db.query(User).all()
+        for u in users:
+            if u.avatar_url and not u.avatar_url.startswith("data:image/") and not u.avatar_url.startswith("http"):
+                data_uri = image_to_base64_data_uri(u.avatar_url)
+                if data_uri:
+                    u.avatar_url = data_uri
+                    updated = True
+                    logger.info("Migrated avatar to DB data URI for user '%s'", u.username)
+
+        if updated:
+            db.commit()
+    except Exception as exc:
+        logger.warning("Image migration skipped or failed non-critically: %s", exc)
+        db.rollback()
+
 
 def seed_database():
     Base.metadata.create_all(bind=engine)
+    ensure_schema_compatibility(engine)
     db: Session = SessionLocal()
 
     try:
@@ -70,7 +182,8 @@ def seed_database():
         for name, code, logo, desc in companies_data:
             c = db.query(Company).filter(Company.code == code).first()
             if not c:
-                c = Company(name=name, code=code, logo_url=logo, description=desc)
+                db_logo = image_to_base64_data_uri(logo) or logo
+                c = Company(name=name, code=code, logo_url=db_logo, description=desc)
                 db.add(c)
                 db.flush()
             company_map[code] = c
@@ -87,12 +200,13 @@ def seed_database():
 
         user_map = {}
         for username, email, pw, full_name, avatar, role_name, comp_codes in users_data:
+            db_avatar = image_to_base64_data_uri(avatar) if (avatar and not avatar.startswith("http")) else avatar
             u = User(
                 username=username,
                 email=email,
                 hashed_password=get_password_hash(pw),
                 full_name=full_name,
-                avatar_url=avatar,
+                avatar_url=db_avatar,
                 role_id=role_map[role_name].id,
                 is_active=True
             )
@@ -108,12 +222,15 @@ def seed_database():
         # Seed sample upload images
         os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
         sample_images = ["1.png", "2.png", "3.png", "4.png"]
-        scratch_logos = "C:/Users/BALAMURUGAN/.gemini/antigravity/brain/7283e62e-62fc-4547-bc48-4eaf05580644/scratch/logos"
         for img in sample_images:
-            src = os.path.join(scratch_logos, img)
-            if os.path.exists(src):
+            cand = resolve_image_file(f"/logos/{img}")
+            if cand and os.path.exists(cand):
                 dest = os.path.join(settings.UPLOAD_DIR, img)
-                shutil.copy2(src, dest)
+                if not os.path.exists(dest):
+                    try:
+                        shutil.copy2(cand, dest)
+                    except Exception:
+                        pass
 
         logger.info("Seeding projects with mandatory employee assignments...")
         now = datetime.datetime.utcnow()
