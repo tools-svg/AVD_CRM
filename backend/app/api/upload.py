@@ -1,6 +1,9 @@
 import os
 import uuid
+import base64
+import io
 import aiofiles
+from PIL import Image
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from app.core.config import settings
 from app.models.all_models import User
@@ -27,9 +30,9 @@ async def upload_image(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Upload image for member avatar or company logo (Section 3).
-    Supported formats: PNG, JPG/JPEG, WEBP, SVG.
-    Validation: Content-type, extension, file size up to 10MB.
+    Upload image for member avatar or company logo.
+    Returns both a database-ready Base64 Data URI (so other users on different machines can view it)
+    and stores a local file copy.
     """
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file selected")
@@ -55,7 +58,7 @@ async def upload_image(
     if len(contents) > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=400,
-            detail=f"File exceeds maximum allowed size of 5MB (size: {len(contents) / (1024 * 1024):.2f}MB)"
+            detail=f"File exceeds maximum allowed size of 10MB (size: {len(contents) / (1024 * 1024):.2f}MB)"
         )
 
     if len(contents) == 0:
@@ -69,10 +72,33 @@ async def upload_image(
         await out_file.write(contents)
 
     relative_url = f"/uploads/{safe_filename}"
+
+    # Generate optimized Base64 data URI to be stored directly in the DB
+    if ext == ".svg":
+        b64_str = base64.b64encode(contents).decode("utf-8")
+        db_url = f"data:image/svg+xml;base64,{b64_str}"
+    else:
+        try:
+            img = Image.open(io.BytesIO(contents))
+            img.thumbnail((512, 512), Image.Resampling.LANCZOS)
+            out_buf = io.BytesIO()
+            if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                img.save(out_buf, format="PNG", optimize=True)
+                mime = "image/png"
+            else:
+                img.convert("RGB").save(out_buf, format="JPEG", quality=85, optimize=True)
+                mime = "image/jpeg"
+            b64_str = base64.b64encode(out_buf.getvalue()).decode("utf-8")
+            db_url = f"data:{mime};base64,{b64_str}"
+        except Exception:
+            b64_str = base64.b64encode(contents).decode("utf-8")
+            mime = "image/png" if ext == ".png" else "image/jpeg"
+            db_url = f"data:{mime};base64,{b64_str}"
+
     return {
-        "url": relative_url,
+        "url": db_url,
+        "local_path": relative_url,
         "filename": safe_filename,
         "size": len(contents),
         "content_type": file.content_type
     }
-

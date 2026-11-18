@@ -188,10 +188,10 @@ export const ProjectDetailsPage: React.FC = () => {
   const priorityColor = PRIORITY_CONFIG[project.priority] || PRIORITY_CONFIG['Medium'];
 
   return (
-    <div className="min-h-screen bg-[#EBE5E5] flex flex-col">
+    <div className="h-screen bg-[#EBE5E5] flex flex-col overflow-hidden">
       <GlobalNavbar />
 
-      <main className="flex-1 w-full max-w-[1600px] mx-auto px-4 sm:px-6 py-2.5 space-y-4">
+      <main className="flex-1 overflow-y-auto w-full max-w-[1600px] mx-auto px-4 sm:px-6 py-2.5 space-y-4">
         {/* Project Heading Card */}
         <section className="bg-[#FFFFFF] rounded-[14px] p-6 border border-[#E1DCDC] shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-2">
