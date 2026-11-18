@@ -81,10 +81,12 @@ async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
         exc,
         exc_info=True,
     )
+    error_summary = str(getattr(exc, "orig", exc))
     return JSONResponse(
         status_code=500,
         content={
-            "detail": "A database operation error occurred. Verify DATABASE_URL, table schema, and backend logs."
+            "detail": f"Database operation error: {error_summary}",
+            "error": error_summary
         },
     )
 
