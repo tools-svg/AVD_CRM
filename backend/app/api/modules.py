@@ -9,7 +9,7 @@ from app.database.session import get_db
 from app.models.all_models import Module, Project, Update, Attachment, User, ActivityLog, Notification, ProjectEmployeeAssignment, ModuleEmployeeAssignment
 from app.schemas.schemas import ModuleOut, ModuleCreate, ModuleUpdate, UpdateOut, AttachmentOut
 from app.permissions.deps import get_current_user
-from app.core.config import settings
+from backend.app.core.config import settings
 from app.services.project_service import calculate_and_update_project_progress
 
 router = APIRouter(prefix="/modules", tags=["Modules"])
