@@ -40,8 +40,8 @@ COPY --from=frontend-build /frontend/dist /usr/share/nginx/html
 RUN rm -f /etc/nginx/sites-enabled/default
 
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
-COPY deploy/supervisord.conf /etc/supervisor/conf.d/app.conf
+COPY deploy/supervisord.conf /etc/supervisor/supervisord.conf
 
 EXPOSE 10000
 
-CMD ["/usr/bin/supervisord", "-n"]
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
