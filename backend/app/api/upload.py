@@ -3,7 +3,12 @@ import uuid
 import base64
 import io
 import aiofiles
-from PIL import Image
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    Image = None
+    HAS_PIL = False
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from app.core.config import settings
 from app.models.all_models import User
@@ -73,10 +78,14 @@ async def upload_image(
 
     relative_url = f"/uploads/{safe_filename}"
 
-    # Generate optimized Base64 data URI to be stored directly in the DB
-    if ext == ".svg":
+    # Generate Base64 data URI to be stored directly in the DB
+    if ext == ".svg" or not HAS_PIL:
         b64_str = base64.b64encode(contents).decode("utf-8")
-        db_url = f"data:image/svg+xml;base64,{b64_str}"
+        if ext == ".svg":
+            db_url = f"data:image/svg+xml;base64,{b64_str}"
+        else:
+            mime = "image/png" if ext == ".png" else "image/jpeg"
+            db_url = f"data:{mime};base64,{b64_str}"
     else:
         try:
             img = Image.open(io.BytesIO(contents))
