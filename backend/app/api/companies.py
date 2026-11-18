@@ -1,6 +1,8 @@
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from app.database.session import get_db
 from app.models.all_models import Company, User, UserCompanyAssignment, Project, ActivityLog
 from app.schemas.schemas import CompanyOut, CompanyCreate, CompanyUpdate, CompanyStatsOut
@@ -105,7 +107,27 @@ def update_company(
         if key == "logo_url" and isinstance(val, str):
             val = val.strip() or None
         setattr(company, key, val)
-    db.commit()
+
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        err_msg = str(exc).lower()
+        if "too long" in err_msg or "truncation" in err_msg or "logo_url" in err_msg or "stringdata" in err_msg:
+            try:
+                db.execute(text("ALTER TABLE companies ALTER COLUMN logo_url TYPE TEXT;"))
+                db.commit()
+                company = db.query(Company).filter(Company.id == company_id).first()
+                for key, val in payload.dict(exclude_unset=True).items():
+                    if key == "logo_url" and isinstance(val, str):
+                        val = val.strip() or None
+                    setattr(company, key, val)
+                db.commit()
+            except Exception:
+                raise exc
+        else:
+            raise exc
+
     db.refresh(company)
 
     db.add(ActivityLog(

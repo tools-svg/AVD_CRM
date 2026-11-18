@@ -178,7 +178,7 @@ class Attachment(Base):
     module_id = Column(Integer, ForeignKey("modules.id"), nullable=False, index=True)
     update_id = Column(Integer, ForeignKey("updates.id"), nullable=True, index=True)
     file_name = Column(String(255), nullable=False)
-    file_path = Column(String(500), nullable=False)
+    file_path = Column(Text, nullable=False)
     file_size = Column(Integer, default=0)
     file_type = Column(String(100), nullable=True) # image/png, image/jpeg, etc.
     uploaded_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
