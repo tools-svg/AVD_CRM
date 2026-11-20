@@ -926,25 +926,18 @@ export const ProjectUpdatePage: React.FC = () => {
 
               {/* ALL 3 BUTTONS AT THE BOTTOM OF RIGHT PANEL */}
               <div className="border-t border-[#E1DCDC] pt-4 space-y-2.5 mt-2">
-                {/* Button 1: Complete Project Option */}
-                {status !== 'Closed' ? (
-                  <button
-                    type="button"
-                    onClick={() => setIsCompleteModalOpen(true)}
-                    className="w-full py-2.5 px-4 rounded-[10px] bg-[#43866B] hover:bg-[#346d56] text-white text-xs font-bold flex items-center justify-center space-x-1.5 shadow-xs transition-colors cursor-pointer"
-                    title="Transition project to Closed status"
-                  >
-                    <CheckCircle className="w-4 h-4" />
-                    <span>Complete Project</span>
-                  </button>
-                ) : (
-                  <div className="w-full py-2 px-3 rounded-[10px] text-[11px] text-[#43866B] font-bold flex items-center justify-center space-x-2 bg-[#E8F3EE] border border-[#43866B]/20">
-                    <CheckCircle className="w-3.5 h-3.5" />
-                    <span>Project is Closed</span>
-                  </div>
-                )}
+                {/* Save & Update occupies the former Complete Project position */}
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={handleSaveProject}
+                  className="w-full py-2.5 px-4 rounded-[10px] bg-[#0A0A0A] text-white text-xs font-bold hover:bg-[#333333] transition-colors shadow-xs flex items-center justify-center space-x-1.5 disabled:opacity-50 cursor-pointer"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>{isSubmitting ? 'Saving...' : 'Save & Update'}</span>
+                </button>
 
-                {/* Buttons 2 & 3: Discard Changes and Save & Update Project */}
+                {/* Discard Changes and Complete Project */}
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
@@ -953,16 +946,22 @@ export const ProjectUpdatePage: React.FC = () => {
                   >
                     Discard Changes
                   </button>
-
-                  <button
-                    type="button"
-                    disabled={isSubmitting}
-                    onClick={handleSaveProject}
-                    className="w-full py-2.5 px-2 rounded-[10px] bg-[#0A0A0A] text-white text-xs font-bold hover:bg-[#333333] transition-colors shadow-xs flex items-center justify-center space-x-1.5 disabled:opacity-50 cursor-pointer truncate"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
-                    <span className="truncate">{isSubmitting ? 'Saving...' : 'Save & Update'}</span>
-                  </button>
+                  {status !== 'Closed' ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsCompleteModalOpen(true)}
+                      className="w-full py-2.5 px-2 rounded-[10px] bg-[#43866B] hover:bg-[#346d56] text-white text-xs font-bold flex items-center justify-center space-x-1.5 shadow-xs transition-colors cursor-pointer"
+                      title="Transition project to Closed status"
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                      <span className="truncate">Complete Project</span>
+                    </button>
+                  ) : (
+                    <div className="w-full py-2 px-2 rounded-[10px] text-[11px] text-[#43866B] font-bold flex items-center justify-center space-x-2 bg-[#E8F3EE] border border-[#43866B]/20">
+                      <CheckCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span className="truncate">Project is Closed</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
