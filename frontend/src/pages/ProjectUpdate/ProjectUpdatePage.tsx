@@ -475,7 +475,7 @@ export const ProjectUpdatePage: React.FC = () => {
                       value={description}
                       onChange={e => setDescription(e.target.value)}
                       placeholder="Outline architectural requirements, charter objectives, deliverables and timeline constraints..."
-                      className="w-full bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] p-3 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] focus:bg-white leading-relaxed resize-none"
+                      className="w-full bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] p-3 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] focus:bg-white leading-relaxed resize-none overflow-y-auto"
                     />
                   </div>
                 </div>
@@ -639,7 +639,7 @@ export const ProjectUpdatePage: React.FC = () => {
                       }
                     }}
                     placeholder="Enter module name to add..."
-                    className="w-full h-[36px] bg-white border border-[#E1DCDC] rounded-[8px] px-3 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] font-medium"
+                    className="w-full bg-white border border-[#E1DCDC] rounded-[8px] px-3 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] font-medium"
                   />
                 </div>
 
@@ -655,7 +655,7 @@ export const ProjectUpdatePage: React.FC = () => {
                       }
                     }}
                     placeholder="Enter module description..."
-                    className="w-full h-[36px] bg-white border border-[#E1DCDC] rounded-[8px] px-3 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] font-medium"
+                    className="w-full bg-white border border-[#E1DCDC] rounded-[8px] px-3 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] font-medium"
                   />
                 </div>
 
@@ -664,7 +664,7 @@ export const ProjectUpdatePage: React.FC = () => {
                     type="button"
                     onClick={handleAddModule}
                     disabled={!tempModName.trim()}
-                    className="w-full h-[36px] rounded-[8px] bg-[#0A0A0A] text-white hover:bg-[#333333] disabled:bg-[#E8E4E4] disabled:text-[#888888] disabled:cursor-not-allowed text-xs font-semibold flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
+                    className="w-full rounded-[8px] bg-[#0A0A0A] text-white hover:bg-[#333333] disabled:bg-[#E8E4E4] disabled:text-[#888888] disabled:cursor-not-allowed text-xs font-semibold flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Add Stream</span>
@@ -688,7 +688,7 @@ export const ProjectUpdatePage: React.FC = () => {
                       <div
                         key={m.id ? `mod-${m.id}` : `new-mod-${idx}`}
                         onClick={() => handleOpenModule(idx)}
-                        className="flex-none w-[calc((100%-48px)/5)] min-w-[195px] h-[54px] px-3.5 py-2 rounded-[12px] bg-[#F5F3F4] hover:bg-[#ECE8E8] border border-[#E1DCDC] hover:border-[#0A0A0A] transition-all flex items-center justify-between space-x-2 shadow-2xs group cursor-pointer"
+                        className="flex-none w-[calc((100%-48px)/5)] min-w-[195px] px-3.5 py-2 rounded-[12px] bg-[#F5F3F4] hover:bg-[#ECE8E8] border border-[#E1DCDC] hover:border-[#0A0A0A] transition-all flex items-center justify-between space-x-2 shadow-2xs group cursor-pointer"
                         title="Click to open module details"
                       >
                         {/* Module Indicator & Details */}
@@ -785,7 +785,7 @@ export const ProjectUpdatePage: React.FC = () => {
                   <select
                     value={status}
                     onChange={e => setStatus(e.target.value)}
-                    className="w-full h-[38px] bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] px-2 text-xs font-bold text-[#0A0A0A] focus:outline-none focus:border-[#0A0A0A] cursor-pointer"
+                    className="w-full bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] px-2 text-xs font-bold text-[#0A0A0A] focus:outline-none focus:border-[#0A0A0A] cursor-pointer"
                   >
                     {PROJECT_STATUS_OPTIONS.map(opt => (
                       <option key={opt} value={opt}>
@@ -800,7 +800,7 @@ export const ProjectUpdatePage: React.FC = () => {
                   <label className="block text-xs font-semibold text-[#333333] mb-1.5">
                     Company Name
                   </label>
-                  <div className="flex items-center space-x-2 bg-[#F5F3F4] px-2.5 h-[38px] rounded-[10px] border border-[#E1DCDC]">
+                  <div className="flex items-center space-x-2 bg-[#F5F3F4] px-2.5 rounded-[10px] border border-[#E1DCDC]">
                     {currentCompany?.logo_url && (
                       <img
                         src={currentCompany.logo_url}
@@ -1027,11 +1027,11 @@ export const ProjectUpdatePage: React.FC = () => {
                   Module Description & Scope
                 </label>
                 <textarea
-                  rows={4}
+                  rows={3}
                   value={editingModule.description}
                   onChange={e => setEditingModule({ ...editingModule, description: e.target.value })}
                   placeholder="Detail module deliverables, technical criteria, and acceptance requirements..."
-                  className="w-full bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] p-3 text-xs text-[#333333] leading-relaxed focus:outline-none focus:border-[#0A0A0A] focus:bg-white resize-none"
+                  className="h-20 w-full bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] p-3 text-xs text-[#333333] leading-relaxed focus:outline-none focus:border-[#0A0A0A] focus:bg-white resize-none overflow-y-auto"
                 />
               </div>
 

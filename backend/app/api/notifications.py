@@ -41,6 +41,9 @@ def create_notification(
             message=existing.message,
             link=existing.link,
             type=existing.type,
+            related_type=existing.related_type,
+            related_id=existing.related_id,
+            action_status=existing.action_status,
             is_read=existing.is_read,
             created_at=existing.created_at
         )
@@ -68,6 +71,9 @@ def create_notification(
         message=notif.message,
         link=notif.link,
         type=notif.type,
+        related_type=notif.related_type,
+        related_id=notif.related_id,
+        action_status=notif.action_status,
         is_read=notif.is_read,
         created_at=notif.created_at
     )
@@ -96,6 +102,9 @@ def get_user_notifications(
             message=n.message,
             link=n.link,
             type=n.type,
+            related_type=n.related_type,
+            related_id=n.related_id,
+            action_status=n.action_status,
             is_read=n.is_read,
             created_at=n.created_at
         ))

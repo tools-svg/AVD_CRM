@@ -70,6 +70,7 @@ class Project(Base):
     creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     lead_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     status = Column(String(50), default="Not Started", index=True) # Not Started, In Progress, Review, On Hold, Closed, Cancelled
+    status_override = Column(String(50), nullable=True)
     priority = Column(String(20), default="Medium", index=True) # Low, Medium, High, Urgent
     progress = Column(Float, default=0.0) # 0 to 100
     start_date = Column(DateTime, nullable=True)
@@ -161,10 +162,17 @@ class Update(Base):
     module_id = Column(Integer, ForeignKey("modules.id"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     description_text = Column(Text, nullable=False)
+    status_change = Column(String(50), nullable=True)
+    progress_change = Column(Float, nullable=True)
+    approval_status = Column(String(20), default="accepted", nullable=False, index=True) # pending, accepted, rejected
+    reviewed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    rejection_reason = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     module = relationship("Module", back_populates="updates")
-    user = relationship("User")
+    user = relationship("User", foreign_keys=[user_id])
+    reviewed_by = relationship("User", foreign_keys=[reviewed_by_id])
     attachments = relationship("Attachment", back_populates="update")
 
 class Attachment(Base):
@@ -223,7 +231,10 @@ class Notification(Base):
     title = Column(String(200), nullable=False)
     message = Column(Text, nullable=False)
     link = Column(String(255), nullable=True)
-    type = Column(String(50), default="mention") # mention, module_update, assignment, status_change, deadline
+    type = Column(String(50), default="mention") # mention, module_update, update_approval, update_accepted, update_rejected, assignment, status_change, deadline
+    related_type = Column(String(50), nullable=True) # e.g. update, project
+    related_id = Column(Integer, nullable=True)
+    action_status = Column(String(20), nullable=True) # pending, accepted, rejected
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 

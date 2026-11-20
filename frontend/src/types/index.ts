@@ -55,7 +55,17 @@ export interface ModuleUpdateRecord {
   user_id: number;
   user_name: string;
   user_avatar?: string;
+  project_id?: number;
+  project_name?: string;
+  module_name?: string;
   description_text: string;
+  status_change?: string;
+  progress_change?: number;
+  approval_status: 'pending' | 'accepted' | 'rejected';
+  reviewed_by_id?: number;
+  reviewed_by_name?: string;
+  reviewed_at?: string;
+  rejection_reason?: string;
   created_at: string;
 }
 
@@ -90,6 +100,9 @@ export interface ModuleItem {
   sort_order: number;
   updates_count: number;
   attachments_count: number;
+  latest_update_status?: 'pending' | 'accepted' | 'rejected';
+  latest_update_text?: string;
+  has_pending_update?: boolean;
   created_at: string;
 }
 
@@ -141,6 +154,9 @@ export interface NotificationItem {
   message: string;
   link?: string;
   type: string;
+  related_type?: string;
+  related_id?: number;
+  action_status?: 'pending' | 'accepted' | 'rejected';
   is_read: boolean;
   created_at: string;
 }
@@ -237,6 +253,8 @@ export interface UIVersionSnapshotRecord {
 }
 
 export interface ElementCustomization {
+  selector?: string;
+  originalText?: string;
   text?: string;
   fontSize?: string;
   fontWeight?: string;

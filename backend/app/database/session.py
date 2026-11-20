@@ -102,29 +102,93 @@ def _verify_engine(candidate_engine, display_url: str):
 
 def ensure_schema_compatibility(engine_instance):
     """
-    Ensure existing tables have TEXT columns for large data URIs and flexible IPs.
-    In PostgreSQL, ALTER COLUMN TYPE TEXT expands existing VARCHAR columns safely without data loss.
-    Each statement executes in an isolated block so individual table states don't block others.
+    Ensure existing tables have TEXT columns and newly required columns for
+    updates approval workflow and rich notifications.
+    Supports both PostgreSQL and SQLite seamlessly.
     """
-    url_str = str(engine_instance.url)
-    if "postgresql" not in url_str and "postgres" not in url_str:
-        return
+    try:
+        insp = inspect(engine_instance)
+        table_names = set(insp.get_table_names())
+        url_str = str(engine_instance.url)
+        is_postgres = "postgresql" in url_str or "postgres" in url_str
 
-    statements = [
-        "ALTER TABLE companies ALTER COLUMN logo_url TYPE TEXT;",
-        "ALTER TABLE users ALTER COLUMN avatar_url TYPE TEXT;",
-        "ALTER TABLE user_sessions ALTER COLUMN ip_address TYPE TEXT;",
-        "ALTER TABLE attachments ALTER COLUMN file_path TYPE TEXT;",
-    ]
+        # PostgreSQL TEXT expansions
+        if is_postgres:
+            statements = [
+                "ALTER TABLE companies ALTER COLUMN logo_url TYPE TEXT;",
+                "ALTER TABLE users ALTER COLUMN avatar_url TYPE TEXT;",
+                "ALTER TABLE user_sessions ALTER COLUMN ip_address TYPE TEXT;",
+                "ALTER TABLE attachments ALTER COLUMN file_path TYPE TEXT;",
+            ]
+            for stmt in statements:
+                try:
+                    with engine_instance.begin() as conn:
+                        conn.execute(text(stmt))
+                except Exception as exc:
+                    logger.debug("Schema compatibility note (%s): %s", stmt, exc)
 
-    for stmt in statements:
-        try:
-            with engine_instance.begin() as conn:
-                conn.execute(text(stmt))
-                logger.info("Schema compatibility updated: %s", stmt)
-        except Exception as exc:
-            # Table might not exist yet or column is already TEXT
-            logger.debug("Schema compatibility note (%s): %s", stmt, exc)
+        # Updates table new columns
+        if "updates" in table_names:
+            update_cols = {c["name"] for c in insp.get_columns("updates")}
+            new_update_cols = [
+                ("status_change", "VARCHAR(50)"),
+                ("progress_change", "FLOAT"),
+                ("approval_status", "VARCHAR(20) DEFAULT 'accepted'"),
+                ("reviewed_by_id", "INTEGER"),
+                ("reviewed_at", "TIMESTAMP"),
+                ("rejection_reason", "TEXT"),
+            ]
+            for col_name, col_type in new_update_cols:
+                if col_name not in update_cols:
+                    stmt = f"ALTER TABLE updates ADD COLUMN {col_name} {col_type};"
+                    try:
+                        with engine_instance.begin() as conn:
+                            conn.execute(text(stmt))
+                        logger.info("Added column %s to updates table", col_name)
+                    except Exception as exc:
+                        logger.debug("Failed adding column %s to updates: %s", col_name, exc)
+
+        if "projects" in table_names:
+            project_cols = {c["name"] for c in insp.get_columns("projects")}
+            added_status_override = False
+            if "status_override" not in project_cols:
+                try:
+                    with engine_instance.begin() as conn:
+                        conn.execute(text("ALTER TABLE projects ADD COLUMN status_override VARCHAR(50)"))
+                    logger.info("Added column status_override to projects table")
+                    added_status_override = True
+                except Exception as exc:
+                    logger.warning("Failed adding column status_override to projects: %s", exc)
+            if added_status_override:
+                try:
+                    with engine_instance.begin() as conn:
+                        conn.execute(text(
+                            "UPDATE projects SET status_override = status "
+                            "WHERE status IN ('Review', 'On Hold', 'Cancelled')"
+                        ))
+                except Exception as exc:
+                    logger.warning("Failed to preserve existing project status overrides: %s", exc)
+
+        # Notifications table new columns
+        if "notifications" in table_names:
+            notif_cols = {c["name"] for c in insp.get_columns("notifications")}
+            new_notif_cols = [
+                ("related_type", "VARCHAR(50)"),
+                ("related_id", "INTEGER"),
+                ("action_status", "VARCHAR(20)"),
+            ]
+            for col_name, col_type in new_notif_cols:
+                if col_name not in notif_cols:
+                    stmt = f"ALTER TABLE notifications ADD COLUMN {col_name} {col_type};"
+                    try:
+                        with engine_instance.begin() as conn:
+                            conn.execute(text(stmt))
+                        logger.info("Added column %s to notifications table", col_name)
+                    except Exception as exc:
+                        logger.debug("Failed adding column %s to notifications: %s", col_name, exc)
+
+    except Exception as exc:
+        logger.warning("ensure_schema_compatibility encountered an error: %s", exc)
 
 
 target_url = normalize_database_url(settings.DATABASE_URL)

@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, s
 from sqlalchemy.orm import Session
 from app.database.session import get_db
 from app.models.all_models import Module, Project, Update, Attachment, User, ActivityLog, Notification, ProjectEmployeeAssignment, ModuleEmployeeAssignment
-from app.schemas.schemas import ModuleOut, ModuleCreate, ModuleUpdate, UpdateOut, AttachmentOut
-from app.permissions.deps import get_current_user
+from app.schemas.schemas import ModuleOut, ModuleCreate, ModuleUpdate, UpdateOut, AttachmentOut, UpdateReviewPayload
+from app.permissions.deps import get_current_user, require_roles
 from app.core.config import settings
 from app.services.project_service import calculate_and_update_project_progress
 
@@ -23,6 +23,11 @@ def _format_module_out(m: Module) -> ModuleOut:
         assigned_ids = [m.assigned_to_id]
 
     display_name = ", ".join(assigned_names) if assigned_names else (m.assigned_to.full_name if m.assigned_to else None)
+
+    latest_update = m.updates[0] if m.updates else None
+    latest_update_status = latest_update.approval_status if latest_update else None
+    latest_update_text = latest_update.description_text if latest_update else None
+    has_pending_update = any(u.approval_status == "pending" for u in m.updates)
 
     return ModuleOut(
         id=m.id,
@@ -42,6 +47,9 @@ def _format_module_out(m: Module) -> ModuleOut:
         sort_order=m.sort_order,
         updates_count=len(m.updates),
         attachments_count=len(m.attachments),
+        latest_update_status=latest_update_status,
+        latest_update_text=latest_update_text,
+        has_pending_update=has_pending_update,
         created_at=m.created_at
     )
 
@@ -191,7 +199,7 @@ def update_module(
 def delete_module(
     module_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_roles(["Director", "Project Manager", "Manager"]))
 ):
     mod = db.query(Module).filter(Module.id == module_id, Module.is_deleted == False).first()
     if not mod:
@@ -221,17 +229,19 @@ async def post_module_update(
     if not mod:
         raise HTTPException(status_code=404, detail="Module not found")
 
-    mod.description = description_text
-    if status_change:
-        mod.status = status_change
-    if progress_change is not None:
-        mod.progress = progress_change
-    mod.updated_at = datetime.utcnow()
+    project = mod.project or db.query(Project).filter(Project.id == mod.project_id).first()
+
+    # All updates submitted to a module must be reviewed and accepted/rejected by the project creator
+    # Never directly auto-accept: always start as 'pending'
+    approval_status = "pending"
 
     update_record = Update(
         module_id=mod.id,
         user_id=current_user.id,
-        description_text=description_text
+        description_text=description_text,
+        status_change=status_change,
+        progress_change=progress_change,
+        approval_status=approval_status
     )
     db.add(update_record)
     db.flush()
@@ -269,28 +279,185 @@ async def post_module_update(
 
     db.commit()
 
-    # SECTION 17: Recalculate parent project progress
-    if mod.project_id:
-        calculate_and_update_project_progress(mod.project_id, db)
+    # The approval request notification goes ONLY to the project creator!
+    # Employees must NEVER receive the approval request.
+    project_creator_id = project.creator_id if project else None
+    project_title = project.title if project else "Project"
 
-    # Notify project lead or assigned member
-    target_user_id = mod.assigned_to_id if mod.assigned_to_id != current_user.id else (mod.project.lead_id if mod.project else None)
-    if target_user_id and target_user_id != current_user.id:
+    if project_creator_id:
         db.add(Notification(
-            user_id=target_user_id,
+            user_id=project_creator_id,
             sender_id=current_user.id,
-            title="Module Update",
-            message=f"{current_user.full_name} posted an update on module '{mod.name}'",
+            title="Update Approval Request",
+            message=f"{current_user.full_name} submitted an update for module '{mod.name}' in project '{project_title}'. Accept or reject the update.",
             link=f"/projects/{mod.project_id}",
-            type="module_update"
+            type="update_approval",
+            related_type="update",
+            related_id=update_record.id,
+            action_status="pending"
         ))
-        db.commit()
+
+    # Send in-app confirmation notification to the employee who submitted
+    if current_user.id != project_creator_id:
+        db.add(Notification(
+            user_id=current_user.id,
+            sender_id=current_user.id,
+            title="Update Submitted",
+            message=f"Your update for module '{mod.name}' in project '{project_title}' has been submitted and is awaiting approval by the project creator.",
+            link=f"/projects/{mod.project_id}",
+            type="info",
+            related_type="update",
+            related_id=update_record.id,
+            action_status="pending"
+        ))
+
+    db.commit()
 
     return {
-        "message": "Update saved successfully",
+        "message": "Update submitted for approval. The project creator has been notified to accept or reject.",
         "update_id": update_record.id,
+        "approval_status": "pending",
         "attachments_count": len(saved_attachments)
     }
+
+@router.post("/updates/{update_id}/review")
+def review_module_update(
+    update_id: int,
+    payload: UpdateReviewPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    update_rec = db.query(Update).filter(Update.id == update_id).with_for_update().first()
+    if not update_rec:
+        raise HTTPException(status_code=404, detail="Update not found")
+
+    mod = db.query(Module).filter(Module.id == update_rec.module_id, Module.is_deleted == False).first()
+    if not mod:
+        raise HTTPException(status_code=404, detail="Module not found")
+
+    project = mod.project
+    if not project or project.creator_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the project creator can accept or reject this update.")
+
+    if update_rec.approval_status != "pending":
+        raise HTTPException(status_code=409, detail="This update has already been reviewed")
+
+    action = payload.action.lower()
+    if action not in ["accept", "reject"]:
+        raise HTTPException(status_code=400, detail="Action must be 'accept' or 'reject'")
+
+    if action == "accept":
+        update_rec.approval_status = "accepted"
+        update_rec.reviewed_by_id = current_user.id
+        update_rec.reviewed_at = datetime.utcnow()
+        update_rec.rejection_reason = None
+
+        # Apply update text and changes to module
+        mod.description = update_rec.description_text
+        if update_rec.status_change:
+            mod.status = update_rec.status_change
+        if update_rec.progress_change is not None:
+            mod.progress = update_rec.progress_change
+        mod.updated_at = datetime.utcnow()
+
+        # Recalculate parent project progress
+        if mod.project_id:
+            calculate_and_update_project_progress(mod.project_id, db)
+
+        # Mark matching approval notifications as accepted
+        db.query(Notification).filter(
+            Notification.related_type == "update",
+            Notification.related_id == update_rec.id
+        ).update({"action_status": "accepted", "is_read": True}, synchronize_session=False)
+
+        # Notify the author who posted the update
+        if update_rec.user_id != current_user.id:
+            db.add(Notification(
+                user_id=update_rec.user_id,
+                sender_id=current_user.id,
+                title="Update Accepted",
+                message=f"Your update for module '{mod.name}' in project '{project.title}' was accepted by {current_user.full_name}.",
+                link=f"/projects/{project.id}",
+                type="update_accepted",
+                related_type="update",
+                related_id=update_rec.id,
+                action_status="accepted"
+            ))
+
+    elif action == "reject":
+        update_rec.approval_status = "rejected"
+        update_rec.reviewed_by_id = current_user.id
+        update_rec.reviewed_at = datetime.utcnow()
+        update_rec.rejection_reason = payload.reason
+
+        # Mark matching approval notifications as rejected
+        db.query(Notification).filter(
+            Notification.related_type == "update",
+            Notification.related_id == update_rec.id
+        ).update({"action_status": "rejected", "is_read": True}, synchronize_session=False)
+
+        # Notify the author who posted the update
+        if update_rec.user_id != current_user.id:
+            reason_suffix = f" Reason: {payload.reason}" if payload.reason else ""
+            db.add(Notification(
+                user_id=update_rec.user_id,
+                sender_id=current_user.id,
+                title="Update Rejected",
+                message=f"Your update for module '{mod.name}' in project '{project.title}' was rejected by {current_user.full_name}.{reason_suffix}",
+                link=f"/projects/{project.id}",
+                type="update_rejected",
+                related_type="update",
+                related_id=update_rec.id,
+                action_status="rejected"
+            ))
+
+    db.commit()
+    db.refresh(update_rec)
+
+    return {
+        "message": f"Update {action}ed successfully",
+        "update_id": update_rec.id,
+        "approval_status": update_rec.approval_status
+    }
+
+@router.get("/updates/pending", response_model=List[UpdateOut])
+def get_pending_module_updates(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    pending_updates = db.query(Update).join(Module, Update.module_id == Module.id).join(
+        Project, Module.project_id == Project.id
+    ).filter(
+        Update.approval_status == "pending",
+        Project.creator_id == current_user.id,
+        Module.is_deleted == False,
+        Project.is_deleted == False
+    ).order_by(Update.created_at.asc()).all()
+
+    results = []
+    for update_rec in pending_updates:
+        mod = update_rec.module
+        project = mod.project if mod else None
+        results.append(UpdateOut(
+            id=update_rec.id,
+            module_id=update_rec.module_id,
+            user_id=update_rec.user_id,
+            user_name=update_rec.user.full_name if update_rec.user else "Unknown",
+            user_avatar=update_rec.user.avatar_url if update_rec.user else None,
+            project_id=project.id if project else None,
+            project_name=project.title if project else None,
+            module_name=mod.name if mod else None,
+            description_text=update_rec.description_text,
+            status_change=update_rec.status_change,
+            progress_change=update_rec.progress_change,
+            approval_status=update_rec.approval_status,
+            reviewed_by_id=update_rec.reviewed_by_id,
+            reviewed_by_name=update_rec.reviewed_by.full_name if update_rec.reviewed_by else None,
+            reviewed_at=update_rec.reviewed_at,
+            rejection_reason=update_rec.rejection_reason,
+            created_at=update_rec.created_at
+        ))
+    return results
 
 @router.get("/{module_id}/updates", response_model=List[UpdateOut])
 def get_module_updates(
@@ -298,7 +465,17 @@ def get_module_updates(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    updates = db.query(Update).filter(Update.module_id == module_id).order_by(Update.created_at.asc()).all()
+    mod = db.query(Module).filter(
+        Module.id == module_id,
+        Module.is_deleted == False
+    ).first()
+    if not mod:
+        raise HTTPException(status_code=404, detail="Module not found")
+
+    updates = db.query(Update).filter(
+        Update.module_id == module_id,
+        Update.approval_status == "accepted"
+    ).order_by(Update.created_at.asc()).all()
     results = []
     for u in updates:
         results.append(UpdateOut(
@@ -307,7 +484,17 @@ def get_module_updates(
             user_id=u.user_id,
             user_name=u.user.full_name if u.user else "Unknown",
             user_avatar=u.user.avatar_url if u.user else None,
+            project_id=mod.project_id,
+            project_name=mod.project.title if mod.project else None,
+            module_name=mod.name,
             description_text=u.description_text,
+            status_change=u.status_change,
+            progress_change=u.progress_change,
+            approval_status=u.approval_status or "accepted",
+            reviewed_by_id=u.reviewed_by_id,
+            reviewed_by_name=u.reviewed_by.full_name if u.reviewed_by else None,
+            reviewed_at=u.reviewed_at,
+            rejection_reason=u.rejection_reason,
             created_at=u.created_at
         ))
     return results

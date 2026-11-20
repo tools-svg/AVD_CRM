@@ -1,6 +1,6 @@
 import secrets
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import case, desc, asc
@@ -17,11 +17,17 @@ from app.models.all_models import (
     ModuleEmployeeAssignment,
     Notification
 )
-from app.schemas.schemas import ProjectOut, ProjectCreate, ProjectUpdate, ModuleOut
+from app.schemas.schemas import ProjectOut, ProjectCreate, ProjectUpdate, ModuleOut, ProjectAssignEmployeeRequest
 from app.permissions.deps import get_current_user, require_roles, get_permitted_company_ids
 from app.services.project_service import calculate_and_update_project_progress
 
 router = APIRouter(prefix="/projects", tags=["Projects"])
+PROJECT_STATUS_OVERRIDES = {"Review", "On Hold", "Cancelled"}
+
+def _as_naive_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 def _format_project_out(p: Project, db: Session) -> ProjectOut:
     modules_out = []
@@ -29,6 +35,10 @@ def _format_project_out(p: Project, db: Session) -> ProjectOut:
         if not m.is_deleted:
             updates_count = len(m.updates)
             attachments_count = len(m.attachments)
+            latest_update = m.updates[0] if m.updates else None
+            latest_update_status = latest_update.approval_status if latest_update else None
+            latest_update_text = latest_update.description_text if latest_update else None
+            has_pending_update = any(u.approval_status == "pending" for u in m.updates)
             modules_out.append(ModuleOut(
                 id=m.id,
                 project_id=m.project_id,
@@ -45,6 +55,9 @@ def _format_project_out(p: Project, db: Session) -> ProjectOut:
                 sort_order=m.sort_order,
                 updates_count=updates_count,
                 attachments_count=attachments_count,
+                latest_update_status=latest_update_status,
+                latest_update_text=latest_update_text,
+                has_pending_update=has_pending_update,
                 created_at=m.created_at
             ))
 
@@ -269,6 +282,7 @@ def create_project(
         creator_id=current_user.id,
         lead_id=primary_lead_id,
         status=payload.status,
+        status_override=payload.status if payload.status in PROJECT_STATUS_OVERRIDES else None,
         priority=payload.priority,
         progress=0.0,
         start_date=payload.start_date,
@@ -285,8 +299,10 @@ def create_project(
     # Optional initial modules with automatic employee assignment inheritance (Section 12)
     if payload.modules:
         default_employee_id = primary_lead_id
+        is_single_employee = (len(assigned_ids) == 1)
         for idx, m_in in enumerate(payload.modules):
-            mod_assignee = m_in.assigned_to_id or default_employee_id
+            # If project is assigned to one person, all modules belong to that one person
+            mod_assignee = default_employee_id if is_single_employee else (m_in.assigned_to_id or default_employee_id)
             mod = Module(
                 project_id=project.id,
                 name=m_in.name,
@@ -350,6 +366,11 @@ def update_project(
         raise HTTPException(status_code=404, detail="Project not found")
 
     role_name = current_user.role.name if current_user.role else ""
+    permitted_company_ids = get_permitted_company_ids(current_user, db)
+    if role_name == "Manager" and permitted_company_ids is not None:
+        if project.company_id not in permitted_company_ids:
+            raise HTTPException(status_code=403, detail="Access denied to this company's project")
+
     if role_name == "Employee":
         is_assigned = db.query(ProjectEmployeeAssignment).filter(
             ProjectEmployeeAssignment.project_id == project.id,
@@ -361,6 +382,15 @@ def update_project(
 
     was_draft = project.is_draft
     update_data = payload.dict(exclude_unset=True)
+    if "status" in update_data:
+        requested_status = update_data["status"]
+        project.status_override = requested_status if requested_status in PROJECT_STATUS_OVERRIDES else None
+
+    if "start_date" in update_data or "deadline" in update_data:
+        start_date = update_data.get("start_date", project.start_date)
+        deadline = update_data.get("deadline", project.deadline)
+        if start_date and deadline and _as_naive_utc(start_date) > _as_naive_utc(deadline):
+            raise HTTPException(status_code=400, detail="Project due date cannot be earlier than its start date")
 
     # Handle employee assignments if provided
     assigned_ids = update_data.pop("assigned_employee_ids", None)
@@ -385,6 +415,8 @@ def update_project(
         existing_mod_map = {m.id: m for m in existing_mods}
         kept_mod_ids = set()
         default_lead = (assigned_ids[0] if (assigned_ids and len(assigned_ids) > 0) else (project.lead_id or current_user.id))
+        is_single_employee = (len(assigned_ids) == 1) if assigned_ids is not None else False
+        sole_assignee = assigned_ids[0] if (assigned_ids and len(assigned_ids) == 1) else None
 
         for idx, m_dict in enumerate(modules_data):
             m_id = m_dict.get("id")
@@ -395,12 +427,35 @@ def update_project(
             m_status = m_dict.get("status", "Not Started")
             m_priority = m_dict.get("priority", "Medium")
             m_progress = float(m_dict.get("progress", 0.0) or 0.0)
-            m_assignee = m_dict.get("assigned_to_id") or default_lead
+            m_assignee = sole_assignee if is_single_employee else (m_dict.get("assigned_to_id") or default_lead)
 
             if m_id and m_id in existing_mod_map:
                 mod = existing_mod_map[m_id]
                 mod.name = m_name
-                mod.description = m_desc
+                if m_desc and m_desc != mod.description:
+                    # Module description changes require creator approval
+                    upd_rec = Update(
+                        module_id=mod.id,
+                        user_id=current_user.id,
+                        description_text=m_desc,
+                        status_change=m_status,
+                        progress_change=m_progress,
+                        approval_status="pending"
+                    )
+                    db.add(upd_rec)
+                    db.flush()
+                    if project.creator_id:
+                        db.add(Notification(
+                            user_id=project.creator_id,
+                            sender_id=current_user.id,
+                            title="Update Approval Request",
+                            message=f"{current_user.full_name} submitted an update for module '{mod.name}' in project '{project.title}'. Accept or reject the update.",
+                            link=f"/projects/{project.id}",
+                            type="update_approval",
+                            related_type="update",
+                            related_id=upd_rec.id,
+                            action_status="pending"
+                        ))
                 mod.status = m_status
                 mod.priority = m_priority
                 mod.progress = m_progress
@@ -435,14 +490,29 @@ def update_project(
                 kept_mod_ids.add(new_mod.id)
 
         # Soft-delete removed modules
+        removed_mods = [
+            mod for m_id, mod in existing_mod_map.items()
+            if m_id not in kept_mod_ids
+        ]
+        if removed_mods and role_name not in ["Director", "Project Manager", "Manager"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Only Director, Project Manager, or Manager can delete project modules"
+            )
         for m_id, mod in existing_mod_map.items():
             if m_id not in kept_mod_ids:
                 mod.is_deleted = True
+    elif assigned_ids is not None and len(assigned_ids) == 1:
+        # If project is assigned to only 1 person, all modules belong to that 1 person
+        sole_user_id = assigned_ids[0]
+        db.query(Module).filter(
+            Module.project_id == project.id,
+            Module.is_deleted == False
+        ).update({Module.assigned_to_id: sole_user_id}, synchronize_session=False)
 
     for key, val in update_data.items():
         setattr(project, key, val)
 
-    # Recalculate progress strictly according to Section 17
     calculate_and_update_project_progress(project.id, db)
 
     project.updated_at = datetime.utcnow()
@@ -563,6 +633,7 @@ def complete_project(
             m.progress = 100.0
 
     project.status = "Closed"
+    project.status_override = None
     project.progress = 100.0
     calculate_and_update_project_progress(project.id, db)
     project.updated_at = datetime.utcnow()
@@ -633,6 +704,7 @@ def revoke_share(
 def add_employee_to_project(
     project_id: int,
     user_id: int,
+    payload: Optional[ProjectAssignEmployeeRequest] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(["Developer", "Director", "Project Manager", "Manager"]))
 ):
@@ -671,8 +743,44 @@ def add_employee_to_project(
             entity_id=project.id,
             details=f"Employee '{target_user.full_name}' was assigned to project '{project.title}'"
         ))
-        db.commit()
 
+    db.flush()
+
+    # Determine assigned employee count after assignment
+    assigned_records = db.query(ProjectEmployeeAssignment).filter(
+        ProjectEmployeeAssignment.project_id == project_id
+    ).all()
+    assigned_count = len(assigned_records)
+
+    project_modules = db.query(Module).filter(
+        Module.project_id == project_id,
+        Module.is_deleted == False
+    ).all()
+
+    # Rule: If project is assigned to only 1 person, ALL modules belong to that one person
+    if assigned_count == 1:
+        for m in project_modules:
+            m.assigned_to_id = user_id
+            existing_mea = db.query(ModuleEmployeeAssignment).filter(
+                ModuleEmployeeAssignment.module_id == m.id,
+                ModuleEmployeeAssignment.user_id == user_id
+            ).first()
+            if not existing_mea:
+                db.add(ModuleEmployeeAssignment(module_id=m.id, user_id=user_id))
+    elif assigned_count > 1 and payload and payload.module_ids:
+        # Rule: If project is assigned to more than 1 person, assign selected modules to this person
+        target_mod_ids = set(payload.module_ids)
+        for m in project_modules:
+            if m.id in target_mod_ids:
+                m.assigned_to_id = user_id
+                existing_mea = db.query(ModuleEmployeeAssignment).filter(
+                    ModuleEmployeeAssignment.module_id == m.id,
+                    ModuleEmployeeAssignment.user_id == user_id
+                ).first()
+                if not existing_mea:
+                    db.add(ModuleEmployeeAssignment(module_id=m.id, user_id=user_id))
+
+    db.commit()
     return _format_project_out(project, db)
 
 @router.delete("/{project_id}/employees/{user_id}")
@@ -701,12 +809,35 @@ def remove_employee_from_project(
         Module.assigned_to_id == user_id
     ).update({Module.assigned_to_id: None}, synchronize_session=False)
 
+    db.query(ModuleEmployeeAssignment).filter(
+        ModuleEmployeeAssignment.module_id.in_([m.id for m in project.modules]),
+        ModuleEmployeeAssignment.user_id == user_id
+    ).delete(synchronize_session=False)
+
+    # Check remaining assigned employees
+    remaining = db.query(ProjectEmployeeAssignment).filter(
+        ProjectEmployeeAssignment.project_id == project_id
+    ).all()
+
     # If this user was the lead, reassign lead to remaining assigned employee or current_user
     if project.lead_id == user_id:
-        remaining = db.query(ProjectEmployeeAssignment).filter(
-            ProjectEmployeeAssignment.project_id == project_id
-        ).first()
-        project.lead_id = remaining.user_id if remaining else current_user.id
+        project.lead_id = remaining[0].user_id if remaining else current_user.id
+
+    # Rule: If only 1 employee remains after removal, all modules belong to that 1 person
+    if len(remaining) == 1:
+        sole_user_id = remaining[0].user_id
+        db.query(Module).filter(
+            Module.project_id == project_id,
+            Module.is_deleted == False
+        ).update({Module.assigned_to_id: sole_user_id}, synchronize_session=False)
+
+        for m in project.modules:
+            existing_mea = db.query(ModuleEmployeeAssignment).filter(
+                ModuleEmployeeAssignment.module_id == m.id,
+                ModuleEmployeeAssignment.user_id == sole_user_id
+            ).first()
+            if not existing_mea:
+                db.add(ModuleEmployeeAssignment(module_id=m.id, user_id=sole_user_id))
 
     if user_id != current_user.id and target_user:
         db.add(Notification(

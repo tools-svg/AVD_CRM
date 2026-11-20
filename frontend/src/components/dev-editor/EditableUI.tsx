@@ -42,6 +42,7 @@ export const EditableUI: React.FC<EditableUIProps> = ({
     {
       ...rest,
       'data-ui-editable': id,
+      'data-ui-key': id,
       className,
       style: mergedStyle,
     },

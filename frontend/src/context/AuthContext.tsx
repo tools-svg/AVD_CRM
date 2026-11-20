@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, Company, RoleName } from '../types';
 import { api } from '../services/api';
+import { showAppToast } from './NotificationContext';
 
 interface AuthContextType {
   user: User | null;
@@ -43,7 +44,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
     } catch (err) {
-      console.error('Failed to restore session:', err);
+      showAppToast({ title: 'Session Error', message: 'Failed to restore session. Please log in again.', type: 'error' });
       logout();
     } finally {
       setIsLoading(false);
@@ -64,7 +65,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Periodic heartbeat every 45s
     const heartbeatTimer = setInterval(() => {
       api.sendHeartbeat(sessionId).catch(err => {
-        console.warn('Session heartbeat check failed:', err);
+        // Silent — heartbeat failures are not surfaced to the user
       });
     }, 45000);
 
@@ -86,7 +87,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         await api.logoutSession(sessionId);
       } catch (err) {
-        console.warn('Logout notification to backend failed:', err);
+        // Silent — backend logout notification is best-effort
       }
     }
     localStorage.removeItem('avd_token');

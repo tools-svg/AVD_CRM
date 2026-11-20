@@ -77,7 +77,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (!user) return;
     try {
       const list = await api.getNotifications();
-      setNotifications(list);
+      setNotifications(list.filter(notification => !notification.is_read));
 
       if (isFirstFetchRef.current) {
         // Seed known ids on first fetch
@@ -90,8 +90,8 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
             knownNotifIdsRef.current.add(n.id);
             if (!n.is_read) {
               const toastType: NotificationType = 
-                n.type === 'error' ? 'error' :
-                n.type === 'warning' ? 'warning' :
+                n.type === 'error' || n.type === 'update_rejected' ? 'error' :
+                n.type === 'warning' || n.type === 'update_approval' ? 'warning' :
                 n.type === 'assignment' || n.type === 'mention' ? 'info' : 'success';
 
               showNotification({
@@ -131,7 +131,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const markAsRead = async (id: number) => {
     try {
       await api.markNotificationRead(id);
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+      setNotifications(prev => prev.filter(n => n.id !== id));
     } catch (e) {
       console.error(e);
     }
@@ -140,7 +140,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const markAllAsRead = async () => {
     try {
       await api.markAllNotificationsRead();
-      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+      setNotifications([]);
     } catch (e) {
       console.error(e);
     }

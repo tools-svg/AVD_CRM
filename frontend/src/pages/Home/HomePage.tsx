@@ -12,12 +12,15 @@ import {
   DollarSign,
   Wallet,
   TrendingUp,
-  Receipt
+  Receipt,
+  Search,
+  Filter
 } from 'lucide-react';
 import { GlobalNavbar } from '../../components/navigation/GlobalNavbar';
 import { BackToTop } from '../../components/navigation/BackToTop';
 import { StickyNotesPanel } from '../../components/sticky-notes/StickyNotesPanel';
 import { InteractiveGantt } from '../../components/gantt/InteractiveGantt';
+import { ProjectKanban } from '../../components/projects/ProjectKanban';
 import { DeveloperUIEditorModal } from '../../components/modals/DeveloperUIEditorModal';
 import { ProjectDeleteModal } from '../../components/modals/ProjectDeleteModal';
 import { ProjectFinanceModal } from '../../components/modals/ProjectFinanceModal';
@@ -52,6 +55,18 @@ export const HomePage: React.FC = () => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [projectView, setProjectView] = useState<'dashboard' | 'kanban' | 'gantt'>(() => {
+    const savedView = window.localStorage.getItem('avd-crm-project-view');
+    return savedView === 'kanban' || savedView === 'gantt' ? savedView : 'dashboard';
+  });
+  const [projectSearch, setProjectSearch] = useState('');
+  const [companyFilter, setCompanyFilter] = useState('');
+  const [employeeFilter, setEmployeeFilter] = useState('');
+  const [priorityFilter, setPriorityFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [updatingProjectId, setUpdatingProjectId] = useState<number | null>(null);
+  const [projectUpdateError, setProjectUpdateError] = useState('');
+  const [projectProgressDrafts, setProjectProgressDrafts] = useState<Record<number, string>>({});
 
   // Requirements 1 & 2: Mode Toggle (PROJECT | AMOUNT)
   const [dashboardMode, setDashboardMode] = useState<'project' | 'amount'>('project');
@@ -83,6 +98,16 @@ export const HomePage: React.FC = () => {
     }
   };
 
+  const refreshProjects = async () => {
+    try {
+      const companyFilterId = isDirectorOrDev ? undefined : (selectedCompanyId || undefined);
+      setProjects(await api.getProjects(companyFilterId));
+    } catch (e) {
+      console.error('Error refreshing projects:', e);
+      setProjectUpdateError(e instanceof Error ? e.message : 'Unable to refresh projects.');
+    }
+  };
+
   const loadFinanceData = async () => {
     if (!canAccessAmountMode) return;
     try {
@@ -97,6 +122,19 @@ export const HomePage: React.FC = () => {
   useEffect(() => {
     loadDashboardData();
   }, [selectedCompanyId, user?.role_name]);
+
+  useEffect(() => {
+    window.localStorage.setItem('avd-crm-project-view', projectView);
+  }, [projectView]);
+
+  useEffect(() => {
+    const handleProjectViewChange = (event: Event) => {
+      const view = (event as CustomEvent).detail;
+      if (view === 'dashboard' || view === 'kanban' || view === 'gantt') setProjectView(view);
+    };
+    window.addEventListener('avd-crm-project-view-change', handleProjectViewChange);
+    return () => window.removeEventListener('avd-crm-project-view-change', handleProjectViewChange);
+  }, []);
 
   useEffect(() => {
     if (dashboardMode === 'amount' && canAccessAmountMode) {
@@ -156,9 +194,81 @@ export const HomePage: React.FC = () => {
 
   const sortedProjects = sortProjects(projects);
 
+  const projectEmployees = useMemo(() => {
+    const employeesById = new Map<number, NonNullable<ProjectItem['assigned_employees']>[number]>();
+    projects.forEach(project => {
+      (project.assigned_employees || []).forEach(employee => employeesById.set(employee.id, employee));
+    });
+    return Array.from(employeesById.values()).sort((a, b) => a.full_name.localeCompare(b.full_name));
+  }, [projects]);
+
+  const filteredProjects = sortedProjects.filter(project => {
+    const query = projectSearch.trim().toLowerCase();
+    const assignedEmployees = project.assigned_employees || [];
+    const matchesSearch = !query || [
+      project.title,
+      project.company_name || '',
+      project.lead_name || '',
+      ...assignedEmployees.map(employee => employee.full_name),
+    ].some(value => value.toLowerCase().includes(query));
+    const matchesEmployee = !employeeFilter
+      || project.lead_id === Number(employeeFilter)
+      || project.assigned_employee_ids?.includes(Number(employeeFilter));
+    return matchesSearch
+      && (!companyFilter || project.company_id === Number(companyFilter))
+      && matchesEmployee
+      && (!priorityFilter || project.priority === priorityFilter)
+      && (!statusFilter || project.status === statusFilter);
+  });
+
   const displayedCompanies = isDirectorOrDev
     ? companies
     : companies.filter(c => selectedCompanyId ? c.id === selectedCompanyId : true);
+  const filteredCompanies = displayedCompanies.filter(company => !companyFilter || company.id === Number(companyFilter));
+
+  const handleUpdateProject = async (project: ProjectItem, changes: Record<string, unknown>) => {
+    if (updatingProjectId !== null) return;
+    if (changes.progress !== undefined) {
+      const progress = Number(changes.progress);
+      if (!Number.isFinite(progress) || progress < 0 || progress > 100) {
+        setProjectUpdateError('Progress must be between 0 and 100.');
+        return;
+      }
+    }
+    const updatedStart = changes.start_date === undefined
+      ? project.start_date
+      : typeof changes.start_date === 'string' ? changes.start_date : null;
+    const updatedDeadline = changes.deadline === undefined
+      ? project.deadline
+      : typeof changes.deadline === 'string' ? changes.deadline : null;
+    if (updatedStart && updatedDeadline && new Date(updatedStart) > new Date(updatedDeadline)) {
+      setProjectUpdateError('The due date cannot be earlier than the start date.');
+      return;
+    }
+
+    setUpdatingProjectId(project.id);
+    setProjectUpdateError('');
+    try {
+      const updatedProject = await api.updateProject(project.id, changes);
+      setProjects(current => current.map(item => item.id === updatedProject.id ? updatedProject : item));
+    } catch (e) {
+      console.error('Error updating project:', e);
+      setProjectUpdateError(e instanceof Error ? e.message : 'Unable to save project changes.');
+      await refreshProjects();
+    } finally {
+      setUpdatingProjectId(null);
+    }
+  };
+
+  const commitProjectProgress = (project: ProjectItem) => {
+    const value = Number(projectProgressDrafts[project.id] ?? project.progress);
+    setProjectProgressDrafts(previous => {
+      const next = { ...previous };
+      delete next[project.id];
+      return next;
+    });
+    if (value !== project.progress) void handleUpdateProject(project, { progress: value });
+  };
 
   const handleDeleteClick = (e: React.MouseEvent, project: ProjectItem) => {
     e.stopPropagation();
@@ -182,75 +292,113 @@ export const HomePage: React.FC = () => {
 
       {/* Main content wrapper with consistent 5px horizontal padding (Requirement 5) */}
       <main className="flex-1 w-full px-[5px] py-4 space-y-5">
-        {/* Main Workspace 75% Left / 25% Right Split */}
-        <section className="grid grid-cols-1 lg:grid-cols-4 gap-5 items-start">
-          {/* LEFT 75%: Statistics Row + Company Project Lists + Interactive Gantt */}
-          <div className="lg:col-span-3 space-y-5">
-            {/* Requirement 1: Dashboard Statistics Directly on Homepage Background */}
+        <section className="rounded-[12px] border border-[#E1DCDC] bg-white p-3 shadow-2xs">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <label className="relative min-w-[220px] flex-1">
+              <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#888888]" />
+              <input
+                type="search"
+                value={projectSearch}
+                onChange={event => setProjectSearch(event.target.value)}
+                placeholder="Search projects, companies or employees..."
+                aria-label="Search projects"
+                className="h-8 w-full rounded-[9px] border border-[#E1DCDC] bg-[#F5F3F4] py-1.5 pl-9 pr-3 text-xs font-medium text-[#333333] outline-none transition-colors focus:border-[#0A0A0A] focus:bg-white"
+              />
+            </label>
+
+            <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-[#888888]">
+              <Filter className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Filters</span>
+            </div>
+            <select
+              value={companyFilter}
+              onChange={event => setCompanyFilter(event.target.value)}
+              aria-label="Filter by company"
+              className="rounded-[9px] border border-[#E1DCDC] bg-white px-2.5 py-2 text-xs text-[#333333]"
+            >
+              <option value="">All Companies</option>
+              {displayedCompanies.map(company => <option key={company.id} value={company.id}>{company.name}</option>)}
+            </select>
+            <select
+              value={employeeFilter}
+              onChange={event => setEmployeeFilter(event.target.value)}
+              aria-label="Filter by employee"
+              className="rounded-[9px] border border-[#E1DCDC] bg-white px-2.5 py-2 text-xs text-[#333333]"
+            >
+              <option value="">All Employees</option>
+              {projectEmployees.map(employee => <option key={employee.id} value={employee.id}>{employee.full_name}</option>)}
+            </select>
+            <select
+              value={priorityFilter}
+              onChange={event => setPriorityFilter(event.target.value)}
+              aria-label="Filter by priority"
+              className="rounded-[9px] border border-[#E1DCDC] bg-white px-2.5 py-2 text-xs text-[#333333]"
+            >
+              <option value="">All Priorities</option>
+              {Object.keys(PRIORITY_CONFIG).map(priority => <option key={priority}>{priority}</option>)}
+            </select>
+            <select
+              value={statusFilter}
+              onChange={event => setStatusFilter(event.target.value)}
+              aria-label="Filter by status"
+              className="rounded-[9px] border border-[#E1DCDC] bg-white px-2.5 py-2 text-xs text-[#333333]"
+            >
+              <option value="">All Statuses</option>
+              {Object.keys(STATUS_CONFIG).map(status => <option key={status}>{status}</option>)}
+            </select>
+            {(projectSearch || companyFilter || employeeFilter || priorityFilter || statusFilter) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setProjectSearch('');
+                  setCompanyFilter('');
+                  setEmployeeFilter('');
+                  setPriorityFilter('');
+                  setStatusFilter('');
+                }}
+                className="rounded-[9px] px-2.5 py-2 text-xs font-semibold text-[#666666] hover:bg-[#F5F3F4]"
+              >
+                Clear filters
+              </button>
+            )}
             {uiConfig.statistics?.visible !== false && (
-              <div className="flex flex-wrap items-center justify-between gap-4 py-1 px-1">
-                {/* Horizontal Statistics with Equal Spacing & Alignment */}
-                <div className="flex items-center space-x-8 sm:space-x-14 flex-wrap gap-y-3">
-                  {/* Total Projects */}
-                  <div className="flex flex-col items-center text-center">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#888888]">
-                      <EditableUI id="stat_label_total" defaultText={uiConfig.statistics?.card1Label || 'Total Projects'} />
-                    </span>
-                    <span className="text-3xl sm:text-4xl font-extrabold text-[#111827] tracking-tight mt-0.5">
-                      {stats ? stats.total_projects : '...'}
-                    </span>
-                  </div>
-
-                  {/* Completed */}
-                  <div className="flex flex-col items-center text-center">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#2F614E]">
-                      <EditableUI id="stat_label_completed" defaultText={uiConfig.statistics?.card2Label || 'Completed'} />
-                    </span>
-                    <span className="text-3xl sm:text-4xl font-extrabold text-[#2F614E] tracking-tight mt-0.5">
-                      {stats ? stats.completed_projects : '...'}
-                    </span>
-                  </div>
-
-                  {/* Ongoing */}
-                  <div className="flex flex-col items-center text-center">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#2563EB]">
-                      <EditableUI id="stat_label_ongoing" defaultText={uiConfig.statistics?.card3Label || 'Ongoing'} />
-                    </span>
-                    <span className="text-3xl sm:text-4xl font-extrabold text-[#2563EB] tracking-tight mt-0.5">
-                      {stats ? stats.ongoing_projects : '...'}
-                    </span>
-                  </div>
+              <div className="ml-auto flex items-center gap-2">
+                <div className="min-w-[82px] rounded-[9px] border border-[#E1DCDC] bg-[#F8F7F7] px-2.5 py-1.5 text-center">
+                  <span className="block text-[9px] font-bold uppercase tracking-wide text-[#888888]">Total</span>
+                  <span className="block text-sm font-extrabold text-[#111827]">{stats ? stats.total_projects : '...'}</span>
                 </div>
-
-                {/* Far Right: Two-Option Toggle PROJECT | AMOUNT (Requirements 1 & 2) */}
-                {canAccessAmountMode && (
-                  <div className="flex items-center bg-[#DED7D7] p-1 rounded-[10px] border border-[#D5CECE] shadow-2xs self-center">
-                    <button
-                      type="button"
-                      onClick={() => setDashboardMode('project')}
-                      className={`px-3 py-1 rounded-[7px] text-xs font-bold transition-all ${
-                        dashboardMode === 'project'
-                          ? 'bg-[#FFFFFF] text-[#0A0A0A] shadow-xs'
-                          : 'text-[#666666] hover:text-[#0A0A0A]'
-                      }`}
-                    >
-                      PROJECT
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDashboardMode('amount')}
-                      className={`px-3 py-1 rounded-[7px] text-xs font-bold transition-all ${
-                        dashboardMode === 'amount'
-                          ? 'bg-[#FFFFFF] text-[#0A0A0A] shadow-xs'
-                          : 'text-[#666666] hover:text-[#0A0A0A]'
-                      }`}
-                    >
-                      AMOUNT
-                    </button>
-                  </div>
-                )}
+                <div className="min-w-[82px] rounded-[9px] border border-[#E1DCDC] bg-[#F8F7F7] px-2.5 py-1.5 text-center">
+                  <span className="block text-[9px] font-bold uppercase tracking-wide text-[#2F614E]">Completed</span>
+                  <span className="block text-sm font-extrabold text-[#2F614E]">{stats ? stats.completed_projects : '...'}</span>
+                </div>
+                <div className="min-w-[82px] rounded-[9px] border border-[#E1DCDC] bg-[#F8F7F7] px-2.5 py-1.5 text-center">
+                  <span className="block text-[9px] font-bold uppercase tracking-wide text-[#2563EB]">Ongoing</span>
+                  <span className="block text-sm font-extrabold text-[#2563EB]">{stats ? stats.ongoing_projects : '...'}</span>
+                </div>
               </div>
             )}
+            {canAccessAmountMode && (
+              <div className="flex items-center rounded-[10px] border border-[#D5CECE] bg-[#DED7D7] p-1">
+                <button type="button" onClick={() => setDashboardMode('project')}
+                  className={`rounded-[7px] px-3 py-1 text-xs font-bold ${dashboardMode === 'project' ? 'bg-white text-[#0A0A0A] shadow-xs' : 'text-[#666666]'}`}>
+                  PROJECT
+                </button>
+                <button type="button" onClick={() => setDashboardMode('amount')}
+                  className={`rounded-[7px] px-3 py-1 text-xs font-bold ${dashboardMode === 'amount' ? 'bg-white text-[#0A0A0A] shadow-xs' : 'text-[#666666]'}`}>
+                  AMOUNT
+                </button>
+              </div>
+            )}
+          </div>
+          {projectUpdateError && (
+            <p role="alert" className="mt-2 text-xs font-medium text-[#A93232]">{projectUpdateError}</p>
+          )}
+        </section>
+
+        {/* Main Workspace 75% Left / 25% Right Split */}
+        <section className="grid grid-cols-1 lg:grid-cols-4 gap-5 items-start">
+          {/* LEFT 75%: Statistics Row + Selected Project View */}
+          <div className={`${projectView === 'dashboard' ? 'lg:col-span-3' : 'lg:col-span-4'} space-y-5`}>
 
             {/* In Amount Mode: Portfolio Financial Summary Ribbon */}
             {dashboardMode === 'amount' && financeDashboard && (
@@ -292,9 +440,10 @@ export const HomePage: React.FC = () => {
               </div>
             )}
 
-            {/* Company Project Lists */}
-            {displayedCompanies.map(company => {
-              const companyProjects = sortedProjects.filter(p => p.company_id === company.id);
+            {projectView === 'dashboard' && (
+              <div className="space-y-5">
+            {filteredCompanies.map(company => {
+              const companyProjects = filteredProjects.filter(p => p.company_id === company.id);
 
               const cCompleted = companyProjects.filter(p => p.status === 'Closed').length;
               const cOngoing = companyProjects.filter(p => ['In Progress', 'Review', 'On Hold'].includes(p.status)).length;
@@ -453,7 +602,6 @@ export const HomePage: React.FC = () => {
                               </tr>
                             );
                           })}
-
                           {companyProjects.length === 0 && (
                             <tr>
                               <td colSpan={6} className="py-6 text-center text-xs text-[#888888]">
@@ -523,12 +671,17 @@ export const HomePage: React.FC = () => {
 
                                 {/* Status Badge */}
                                 <td className="py-3 px-3 align-middle text-center">
-                                  <span
+                                  <select
+                                    aria-label={`Status for ${item.title}`}
+                                    value={item.status}
+                                    disabled={updatingProjectId !== null}
+                                    onClick={event => event.stopPropagation()}
+                                    onChange={event => handleUpdateProject(item, { status: event.target.value })}
                                     style={{ backgroundColor: statusColor.bg, color: statusColor.text }}
-                                    className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold inline-block whitespace-nowrap"
+                                    className="max-w-full cursor-pointer rounded-full border-0 px-2.5 py-0.5 text-[10px] font-semibold outline-none disabled:opacity-60"
                                   >
-                                    {item.status}
-                                  </span>
+                                    {Object.keys(STATUS_CONFIG).map(status => <option key={status}>{status}</option>)}
+                                  </select>
                                 </td>
 
                                 {/* Priority Badge */}
@@ -544,14 +697,22 @@ export const HomePage: React.FC = () => {
                                 {/* Progress */}
                                 <td className="py-3 px-3 align-middle text-center">
                                   <div className="flex items-center justify-center space-x-2">
-                                    <div className="w-16 h-1.5 bg-[#E8E4E4] rounded-full overflow-hidden flex-shrink-0">
-                                      <div
-                                        style={{ width: `${item.progress}%` }}
-                                        className="h-full bg-[#333333] rounded-full"
-                                      />
-                                    </div>
-                                    <span className="text-[10px] font-bold text-[#333333] w-8">
-                                      {item.progress}%
+                                    <input
+                                      aria-label={`Progress for ${item.title}`}
+                                      type="range"
+                                      min="0"
+                                      max="100"
+                                      step="1"
+                                      value={projectProgressDrafts[item.id] ?? String(Math.round(item.progress || 0))}
+                                      disabled={updatingProjectId !== null}
+                                      onClick={event => event.stopPropagation()}
+                                      onChange={event => setProjectProgressDrafts(previous => ({ ...previous, [item.id]: event.target.value }))}
+                                      onPointerUp={() => commitProjectProgress(item)}
+                                      onKeyUp={() => commitProjectProgress(item)}
+                                      className="w-16 accent-[#333333] disabled:opacity-60"
+                                    />
+                                    <span className="w-8 text-[10px] font-bold text-[#333333]">
+                                      {projectProgressDrafts[item.id] ?? Math.round(item.progress)}%
                                     </span>
                                   </div>
                                 </td>
@@ -608,20 +769,50 @@ export const HomePage: React.FC = () => {
                 </div>
               );
             })}
+              {filteredCompanies.length === 0 && (
+                <div className="rounded-[14px] border border-dashed border-[#D5CECE] bg-white p-8 text-center text-xs text-[#777777]">
+                  No companies are available for this account.
+                </div>
+              )}
+              {filteredCompanies.length > 0 && filteredProjects.length === 0 && (
+                <div className="rounded-[14px] border border-dashed border-[#D5CECE] bg-white p-8 text-center text-xs text-[#777777]">
+                  {loading ? 'Loading projects…' : 'No projects match the current search and filters.'}
+                </div>
+              )}
+              </div>
+            )}
+
+            {projectView === 'kanban' && (
+              <ProjectKanban
+                projects={filteredProjects}
+                busyProjectId={updatingProjectId}
+                onUpdateProject={handleUpdateProject}
+                onOpenProject={projectId => navigate(`/projects/${projectId}`)}
+              />
+            )}
+
+            {projectView === 'gantt' && (
+              <InteractiveGantt
+                companyId={isDirectorOrDev ? undefined : (selectedCompanyId || undefined)}
+                employeeId={employeeFilter ? Number(employeeFilter) : undefined}
+                projects={filteredProjects}
+                busyProjectId={updatingProjectId}
+                onUpdateProject={handleUpdateProject}
+                onModuleUpdated={refreshProjects}
+                onOpenProject={projectId => navigate(`/projects/${projectId}`)}
+              />
+            )}
+
           </div>
 
-          {/* RIGHT 25%: Sticky Notes Panel */}
-          <div className="lg:col-span-1">
-            <StickyNotesPanel />
-          </div>
+          {/* Sticky notes remain available only in Dashboard view */}
+          {projectView === 'dashboard' && (
+            <div className="lg:col-span-1">
+              <StickyNotesPanel />
+            </div>
+          )}
         </section>
 
-        {/* SECTION 7: Full-Width Gantt Chart */}
-        {uiConfig.project_list?.showGantt !== false && (
-          <section className="w-full">
-            <InteractiveGantt companyId={isDirectorOrDev ? undefined : (selectedCompanyId || undefined)} />
-          </section>
-        )}
       </main>
 
       {/* Project Financial Tracking & Payment Ledger Modal */}

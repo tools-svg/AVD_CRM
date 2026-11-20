@@ -182,32 +182,72 @@ class TestPlatformFeatures(unittest.TestCase):
         prog = calculate_and_update_project_progress(p.id, db)
         self.assertEqual(prog, 0.0)
 
-        # Add 5 modules: 1 Closed, 4 non-closed
-        m1 = Module(project_id=p.id, name="M1", status="Closed")
-        m2 = Module(project_id=p.id, name="M2", status="In Progress")
-        m3 = Module(project_id=p.id, name="M3", status="Review")
-        m4 = Module(project_id=p.id, name="M4", status="On Hold")
-        m5 = Module(project_id=p.id, name="M5", status="Cancelled")
-        db.add_all([m1, m2, m3, m4, m5])
+        # Progress is the mean of every active module's own percentage.
+        m1 = Module(project_id=p.id, name="M1", status="Closed", progress=100)
+        m2 = Module(project_id=p.id, name="M2", status="In Progress", progress=0)
+        m3 = Module(project_id=p.id, name="M3", status="Review", progress=50)
+        m4 = Module(project_id=p.id, name="M4", status="On Hold", progress=0)
+        m5 = Module(project_id=p.id, name="M5", status="Cancelled", progress=0)
+        deleted_module = Module(
+            project_id=p.id,
+            name="Archived",
+            status="Not Started",
+            progress=0,
+            is_deleted=True
+        )
+        db.add_all([m1, m2, m3, m4, m5, deleted_module])
         db.commit()
 
-        # 1 / 5 = 20.0%
+        # (100 + 0 + 50 + 0 + 0) / 5 = 30.0%
         prog = calculate_and_update_project_progress(p.id, db)
-        self.assertEqual(prog, 20.0)
+        self.assertEqual(prog, 30.0)
 
-        # Close another module: 2 / 5 = 40.0%
+        # Updating a module's own percentage changes the arithmetic mean.
         m2.status = "Closed"
+        m2.progress = 100
         db.commit()
         prog = calculate_and_update_project_progress(p.id, db)
-        self.assertEqual(prog, 40.0)
+        self.assertEqual(prog, 50.0)
 
-        # Close all 5: 5 / 5 = 100.0%
+        # All modules completed with full progress yields 100%.
         m3.status = "Closed"
+        m3.progress = 100
         m4.status = "Closed"
+        m4.progress = 100
         m5.status = "Closed"
+        m5.progress = 100
         db.commit()
         prog = calculate_and_update_project_progress(p.id, db)
         self.assertEqual(prog, 100.0)
+        self.assertEqual(p.status, "Closed")
+
+        p.status_override = "Review"
+        db.commit()
+        calculate_and_update_project_progress(p.id, db)
+        self.assertEqual(p.status, "Review")
+
+        p.status_override = None
+        for module in [m1, m2, m3, m4, m5]:
+            module.status = "Not Started"
+        db.commit()
+        calculate_and_update_project_progress(p.id, db)
+        self.assertEqual(p.status, "Not Started")
+
+        for module in [m1, m2, m3, m4, m5]:
+            module.status = "On Hold"
+        db.commit()
+        calculate_and_update_project_progress(p.id, db)
+        self.assertEqual(p.status, "On Hold")
+
+        m1.status = "In Progress"
+        db.commit()
+        calculate_and_update_project_progress(p.id, db)
+        self.assertEqual(p.status, "In Progress")
+
+        p.status_override = "Cancelled"
+        db.commit()
+        calculate_and_update_project_progress(p.id, db)
+        self.assertEqual(p.status, "Cancelled")
         db.close()
 
     # ---------------------------------------------------------
@@ -564,6 +604,66 @@ class TestPlatformFeatures(unittest.TestCase):
         )
         self.assertEqual(res_reject.status_code, 400)
         self.assertIn("no assigned employees", res_reject.json()["detail"].lower())
+
+    def test_project_view_updates_persist_and_validate(self):
+        db = TestingSessionLocal()
+        project = Project(
+            title="Shared Project View Update",
+            company_id=self.c2_id,
+            creator_id=self.dir_id,
+            status="Not Started",
+            priority="Medium",
+            progress=0,
+            is_draft=False
+        )
+        db.add(project)
+        db.commit()
+        project_id = project.id
+        db.close()
+
+        updated = client.put(
+            f"/api/projects/{project_id}",
+            headers=self.dir_headers,
+            json={
+                "status": "Review",
+                "priority": "Urgent",
+                "progress": 42,
+                "start_date": "2026-03-01T00:00:00Z",
+                "deadline": "2026-03-20T00:00:00Z"
+            }
+        )
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["status"], "Review")
+        self.assertEqual(updated.json()["priority"], "Urgent")
+        self.assertEqual(updated.json()["progress"], 42)
+
+        invalid_dates = client.put(
+            f"/api/projects/{project_id}",
+            headers=self.dir_headers,
+            json={"start_date": "2026-03-25T00:00:00Z", "deadline": "2026-03-20T00:00:00Z"}
+        )
+        self.assertEqual(invalid_dates.status_code, 400)
+        invalid_progress = client.put(
+            f"/api/projects/{project_id}",
+            headers=self.dir_headers,
+            json={"progress": 120}
+        )
+        self.assertEqual(invalid_progress.status_code, 422)
+
+        manager_update = client.put(
+            f"/api/projects/{project_id}",
+            headers=self.mgr_headers,
+            json={"status": "In Progress"}
+        )
+        self.assertEqual(manager_update.status_code, 403)
+
+        verify_db = TestingSessionLocal()
+        saved = verify_db.query(Project).filter(Project.id == project_id).one()
+        self.assertEqual(saved.status, "Review")
+        self.assertEqual(saved.priority, "Urgent")
+        self.assertEqual(saved.progress, 42)
+        self.assertEqual(saved.start_date.date().isoformat(), "2026-03-01")
+        verify_db.close()
 
 if __name__ == "__main__":
     unittest.main()

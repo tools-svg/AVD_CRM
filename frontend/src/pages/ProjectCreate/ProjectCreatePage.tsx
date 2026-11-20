@@ -410,11 +410,11 @@ export const ProjectCreatePage: React.FC = () => {
                       Project Description
                     </label>
                     <textarea
-                      rows={4}
+                      rows={5}
                       value={description}
                       onChange={e => setDescription(e.target.value)}
                       placeholder="Outline architectural requirements, charter objectives, deliverables and timeline constraints..."
-                      className="w-full bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] p-3 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] focus:bg-white leading-relaxed resize-none"
+                      className="w-full bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] p-3 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] focus:bg-white leading-relaxed resize-none overflow-y-auto"
                     />
                   </div>
                 </div>
@@ -578,7 +578,7 @@ export const ProjectCreatePage: React.FC = () => {
                       }
                     }}
                     placeholder="Module Name (e.g. Distributed Consensus Engine)"
-                    className="w-full h-[36px] bg-white border border-[#E1DCDC] rounded-[8px] px-3 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] font-medium"
+                    className="w-full bg-white border border-[#E1DCDC] rounded-[8px] px-3 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] font-medium"
                   />
                 </div>
                 <div className="md:col-span-5">
@@ -593,7 +593,7 @@ export const ProjectCreatePage: React.FC = () => {
                       }
                     }}
                     placeholder="Module Description (e.g. Core architectural workflows)..."
-                    className="w-full h-[36px] bg-white border border-[#E1DCDC] rounded-[8px] px-3 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] font-medium"
+                    className="w-full bg-white border border-[#E1DCDC] rounded-[8px] px-3 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] font-medium"
                   />
                 </div>
                 <div className="md:col-span-2">
@@ -601,7 +601,7 @@ export const ProjectCreatePage: React.FC = () => {
                     type="button"
                     onClick={handleAddModule}
                     disabled={!tempModName.trim()}
-                    className="w-full h-[36px] rounded-[8px] bg-[#0A0A0A] text-white hover:bg-[#333333] disabled:bg-[#E8E4E4] disabled:text-[#888888] disabled:cursor-not-allowed text-xs font-semibold flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
+                    className="w-full rounded-[8px] bg-[#0A0A0A] text-white hover:bg-[#333333] disabled:bg-[#E8E4E4] disabled:text-[#888888] disabled:cursor-not-allowed text-xs font-semibold flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Add Stream</span>
@@ -625,7 +625,7 @@ export const ProjectCreatePage: React.FC = () => {
                       <div
                         key={idx}
                         onClick={() => handleOpenModule(idx)}
-                        className="flex-none w-[calc((100%-48px)/5)] min-w-[195px] h-[54px] px-3.5 py-2 rounded-[12px] bg-[#F5F3F4] hover:bg-[#ECE8E8] border border-[#E1DCDC] hover:border-[#0A0A0A] transition-all flex items-center justify-between space-x-2 shadow-2xs group cursor-pointer"
+                        className="flex-none w-[calc((100%-48px)/5)] min-w-[195px] px-3.5 py-2 rounded-[12px] bg-[#F5F3F4] hover:bg-[#ECE8E8] border border-[#E1DCDC] hover:border-[#0A0A0A] transition-all flex items-center justify-between space-x-2 shadow-2xs group cursor-pointer"
                         title="Click to configure module specifications"
                       >
                         {/* Module Indicator & Details */}
@@ -931,11 +931,11 @@ export const ProjectCreatePage: React.FC = () => {
                   Module Description & Scope
                 </label>
                 <textarea
-                  rows={4}
+                  rows={3}
                   value={editingModule.description}
                   onChange={e => setEditingModule({ ...editingModule, description: e.target.value })}
                   placeholder="Detail module deliverables, technical criteria, and acceptance requirements..."
-                  className="w-full bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] p-3 text-xs text-[#333333] leading-relaxed focus:outline-none focus:border-[#0A0A0A] focus:bg-white resize-none"
+                  className="h-20 w-full bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] p-3 text-xs text-[#333333] leading-relaxed focus:outline-none focus:border-[#0A0A0A] focus:bg-white resize-none overflow-y-auto"
                 />
               </div>
 
