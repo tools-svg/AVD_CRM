@@ -1,6 +1,6 @@
 from typing import Optional, List, Any, Dict
 from datetime import datetime
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 # Auth Schemas
 class Token(BaseModel):
@@ -101,10 +101,24 @@ class UpdateOut(BaseModel):
     user_id: int
     user_name: str
     user_avatar: Optional[str] = None
+    project_id: Optional[int] = None
+    project_name: Optional[str] = None
+    module_name: Optional[str] = None
     description_text: str
+    status_change: Optional[str] = None
+    progress_change: Optional[float] = None
+    approval_status: str = "accepted"
+    reviewed_by_id: Optional[int] = None
+    reviewed_by_name: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
     created_at: datetime
     class Config:
         from_attributes = True
+
+class UpdateReviewPayload(BaseModel):
+    action: str # "accept" or "reject"
+    reason: Optional[str] = None
 
 class AttachmentOut(BaseModel):
     id: int
@@ -139,7 +153,7 @@ class ModuleUpdate(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = None
     priority: Optional[str] = None
-    progress: Optional[float] = None
+    progress: Optional[float] = Field(default=None, ge=0, le=100)
     start_date: Optional[datetime] = None
     deadline: Optional[datetime] = None
     assigned_to_id: Optional[int] = None
@@ -154,6 +168,9 @@ class ModuleOut(ModuleBase):
     assigned_employee_names: Optional[List[str]] = []
     updates_count: int = 0
     attachments_count: int = 0
+    latest_update_status: Optional[str] = None
+    latest_update_text: Optional[str] = None
+    has_pending_update: bool = False
     created_at: datetime
     class Config:
         from_attributes = True
@@ -182,7 +199,7 @@ class ProjectUpdate(BaseModel):
     lead_id: Optional[int] = None
     status: Optional[str] = None
     priority: Optional[str] = None
-    progress: Optional[float] = None
+    progress: Optional[float] = Field(default=None, ge=0, le=100)
     start_date: Optional[datetime] = None
     deadline: Optional[datetime] = None
     is_draft: Optional[bool] = None
@@ -204,6 +221,9 @@ class ProjectOut(ProjectBase):
     share_token: Optional[str] = None
     class Config:
         from_attributes = True
+
+class ProjectAssignEmployeeRequest(BaseModel):
+    module_ids: Optional[List[int]] = None
 
 # Sticky Note Schemas
 class StickyNoteCreate(BaseModel):
@@ -247,6 +267,9 @@ class NotificationOut(BaseModel):
     message: str
     link: Optional[str] = None
     type: str
+    related_type: Optional[str] = None
+    related_id: Optional[int] = None
+    action_status: Optional[str] = None
     is_read: bool
     created_at: datetime
     class Config:

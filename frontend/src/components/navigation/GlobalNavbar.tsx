@@ -9,18 +9,14 @@ import {
   Check, 
   Layers, 
   User as UserIcon,
-  Search,
-  X,
-  Loader2,
-  FolderKanban,
-  FileCode,
   Users,
-  Edit3
+  Edit3,
+  ClipboardCheck
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { useUIConfig } from '../../context/UIConfigContext';
-import { RoleName, SearchResultItem } from '../../types';
+import { ModuleUpdateRecord, RoleName } from '../../types';
 import { api } from '../../services/api';
 import { MemberProfileModal } from '../modals/MemberProfileModal';
 
@@ -44,14 +40,22 @@ export const GlobalNavbar: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
-  const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
+  const { notifications, unreadCount, markAsRead, markAllAsRead, refreshNotifications } = useNotifications();
   const { uiConfig, customizationRole, setCustomizationRole, setIsEditorOpen, isDirectEditingMode, setIsDirectEditingMode } = useUIConfig();
 
   const [activeSlide, setActiveSlide] = useState(0);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
+  const [showApprovalMenu, setShowApprovalMenu] = useState(false);
+  const [pendingApprovals, setPendingApprovals] = useState<ModuleUpdateRecord[]>([]);
+  const [reviewingUpdateId, setReviewingUpdateId] = useState<number | null>(null);
+  const [approvalError, setApprovalError] = useState('');
   const [showRoleSelector, setShowRoleSelector] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [projectView, setProjectView] = useState<'dashboard' | 'kanban' | 'gantt'>(() => {
+    const savedView = window.localStorage.getItem('avd-crm-project-view');
+    return savedView === 'kanban' || savedView === 'gantt' ? savedView : 'dashboard';
+  });
 
   // In-app navigation history stack for Logo Back Navigation (Section 12)
   const historyStackRef = useRef<string[]>([]);
@@ -63,13 +67,6 @@ export const GlobalNavbar: React.FC = () => {
     }
   }, [location.pathname]);
 
-  // Search state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<SearchResultItem[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
-  const searchRef = useRef<HTMLDivElement>(null);
-
   // Logo slideshow auto-rotation (3.5s interval)
   useEffect(() => {
     const timer = setInterval(() => {
@@ -78,41 +75,43 @@ export const GlobalNavbar: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
-  // Search outside click handler
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
-        setShowSearchDropdown(false);
+    let active = true;
+    const loadPendingApprovals = async () => {
+      if (!user) {
+        setPendingApprovals([]);
+        return;
+      }
+      try {
+        const updates = await api.getPendingModuleUpdates();
+        if (active) setPendingApprovals(updates);
+      } catch (error) {
+        console.error('Failed to load pending update approvals:', error);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
-  // Debounced Search API call (Section 9)
-  useEffect(() => {
-    const trimmed = searchQuery.trim();
-    if (!trimmed) {
-      setSearchResults([]);
-      setShowSearchDropdown(false);
-      return;
+    loadPendingApprovals();
+    const interval = window.setInterval(loadPendingApprovals, 10000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [user?.id]);
+
+  const handleReviewUpdate = async (updateId: number, action: 'accept' | 'reject') => {
+    if (reviewingUpdateId !== null) return;
+    setReviewingUpdateId(updateId);
+    setApprovalError('');
+    try {
+      await api.reviewModuleUpdate(updateId, action);
+      setPendingApprovals(current => current.filter(update => update.id !== updateId));
+      await refreshNotifications();
+    } catch (error) {
+      setApprovalError(error instanceof Error ? error.message : 'Unable to review this update.');
+    } finally {
+      setReviewingUpdateId(null);
     }
-    const handler = setTimeout(async () => {
-      setIsSearching(true);
-      try {
-        const results = await api.search(trimmed);
-        setSearchResults(results);
-        setShowSearchDropdown(true);
-      } catch (e) {
-        console.error('Search failed:', e);
-        setSearchResults([]);
-      } finally {
-        setIsSearching(false);
-      }
-    }, 300);
-
-    return () => clearTimeout(handler);
-  }, [searchQuery]);
+  };
 
   const handleLogoClick = () => {
     // Section 12.2: When user is on Home page, clicking logo keeps them on Home page
@@ -135,35 +134,9 @@ export const GlobalNavbar: React.FC = () => {
     }
   };
 
-  const handleSelectSearchResult = (item: SearchResultItem) => {
-    setShowSearchDropdown(false);
-    setSearchQuery('');
-    if (item.type === 'project') {
-      navigate(`/projects/${item.id}`);
-    } else if (item.type === 'module') {
-      navigate(`/projects/${item.project_id}`);
-    } else if (item.type === 'employee') {
-      navigate('/home');
-    }
-  };
-
-  const highlightMatch = (text?: string, query?: string) => {
-    if (!text || !query) return text;
-    const cleanQuery = query.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
-    const regex = new RegExp(`(${cleanQuery})`, 'gi');
-    const parts = text.split(regex);
-    return parts.map((part, i) =>
-      part.toLowerCase() === query.toLowerCase() ? (
-        <span key={i} className="bg-[#F4E9D2] text-[#A78645] font-semibold px-0.5 rounded">
-          {part}
-        </span>
-      ) : (
-        part
-      )
-    );
-  };
 
   const isDeveloper = user?.role_name === 'Developer';
+  const isProjectHome = location.pathname === '/home' || location.pathname === '/';
 
   return (
     <header className="sticky top-0 z-40 bg-[#FFFFFF] border-b border-[#E1DCDC] shadow-xs px-4 sm:px-6 py-2.5 flex items-center justify-between">
@@ -204,91 +177,31 @@ export const GlobalNavbar: React.FC = () => {
           </span>
         )}
 
-        {/* Global Search Bar (Section 9: Live Database Search with Debounce) */}
-        <div ref={searchRef} className="relative hidden md:block w-72 lg:w-80">
-          <div className="flex items-center bg-[#F5F3F4] rounded-[10px] px-3.5 py-1.5 text-xs border border-[#E1DCDC] focus-within:border-[#0A0A0A] focus-within:bg-[#FFFFFF] transition-all">
-            <Search className="w-3.5 h-3.5 text-[#888888] mr-2 flex-shrink-0" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              onFocus={() => {
-                if (searchResults.length > 0 || searchQuery.trim().length > 0) {
-                  setShowSearchDropdown(true);
-                }
-              }}
-              placeholder={uiConfig.navbar?.searchPlaceholder || 'Search projects, modules, employees...'}
-              className="bg-transparent border-none outline-none text-[#333333] placeholder-[#888888] text-xs w-full font-medium"
-            />
-            {isSearching && (
-              <Loader2 className="w-3.5 h-3.5 text-[#888888] animate-spin flex-shrink-0 ml-1.5" />
-            )}
-            {searchQuery && !isSearching && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchQuery('');
-                  setSearchResults([]);
-                  setShowSearchDropdown(false);
-                }}
-                className="text-[#888888] hover:text-[#333333] ml-1.5"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            )}
-          </div>
-
-          {/* Search Results Dropdown */}
-          {showSearchDropdown && (
-            <div className="absolute left-0 right-0 mt-1.5 bg-white rounded-[12px] shadow-xl border border-[#E1DCDC] py-1.5 z-50 max-h-80 overflow-y-auto animate-in fade-in duration-150">
-              {searchResults.length === 0 ? (
-                <div className="px-4 py-3 text-center text-xs text-[#888888]">
-                  {isSearching ? 'Searching database...' : `No records matching "${searchQuery}"`}
-                </div>
-              ) : (
-                <div className="divide-y divide-[#F5F3F4]">
-                  {searchResults.map(item => (
-                    <button
-                      key={`${item.type}-${item.id}`}
-                      onClick={() => handleSelectSearchResult(item)}
-                      className="w-full text-left px-3.5 py-2 hover:bg-[#F5F3F4] flex items-start space-x-2.5 transition-colors"
-                    >
-                      <div className="mt-0.5 p-1 rounded bg-[#EBE5E5] text-[#333333] flex-shrink-0">
-                        {item.type === 'project' && <FolderKanban className="w-3.5 h-3.5 text-[#0A0A0A]" />}
-                        {item.type === 'module' && <FileCode className="w-3.5 h-3.5 text-[#5269A8]" />}
-                        {item.type === 'employee' && <Users className="w-3.5 h-3.5 text-[#43866B]" />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-semibold text-[#0A0A0A] truncate">
-                            {highlightMatch(item.title, searchQuery)}
-                          </span>
-                          <span className="text-[10px] uppercase font-bold text-[#888888] bg-[#F5F3F4] px-1.5 py-0.5 rounded">
-                            {item.type}
-                          </span>
-                        </div>
-                        {item.subtitle && (
-                          <p className="text-[11px] text-[#666666] truncate mt-0.5">
-                            {highlightMatch(item.subtitle, searchQuery)}
-                          </p>
-                        )}
-                        {item.snippet && (
-                          <p className="text-[10px] text-[#888888] truncate mt-0.5">
-                            {highlightMatch(item.snippet, searchQuery)}
-                          </p>
-                        )}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Right Navigation Controls */}
       <div className="flex items-center space-x-3">
+        {isProjectHome && (
+          <label className="relative flex-shrink-0">
+            <span className="sr-only">Project view</span>
+            <select
+              value={projectView}
+              onChange={event => {
+                const nextView = event.target.value as 'dashboard' | 'kanban' | 'gantt';
+                setProjectView(nextView);
+                window.localStorage.setItem('avd-crm-project-view', nextView);
+                window.dispatchEvent(new CustomEvent('avd-crm-project-view-change', { detail: nextView }));
+              }}
+              aria-label="Select project view"
+              className="max-w-[130px] appearance-none rounded-[10px] border border-[#E1DCDC] bg-[#F5F3F4] py-1.5 pl-2.5 pr-7 text-xs font-semibold text-[#333333] outline-none focus:border-[#0A0A0A] lg:max-w-none"
+            >
+              <option value="dashboard">Dashboard View</option>
+              <option value="kanban">Kanban View</option>
+              <option value="gantt">Gantt View</option>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[#777777]" />
+          </label>
+        )}
         {/* Developer Interface Customization Dropdown */}
         {isDeveloper && (
           <div className="relative">
@@ -338,6 +251,75 @@ export const GlobalNavbar: React.FC = () => {
                       </span>
                       {customizationRole === role && <Check className="w-3.5 h-3.5 text-[#43866B]" />}
                     </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {pendingApprovals.length > 0 && (
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setShowApprovalMenu(!showApprovalMenu);
+                setShowNotifMenu(false);
+                setShowProfileMenu(false);
+                setShowRoleSelector(false);
+              }}
+              className="relative flex items-center gap-1.5 rounded-[10px] border border-[#E1DCDC] bg-[#F5F3F4] px-3 py-2 text-xs font-semibold text-[#333333] hover:bg-[#E8E4E4]"
+              title="Review pending project updates"
+            >
+              <ClipboardCheck className="h-4 w-4 text-[#5269A8]" />
+              <span className="hidden sm:inline">Approvals</span>
+              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#A93232] px-1 text-[10px] font-bold text-white">
+                {pendingApprovals.length}
+              </span>
+            </button>
+            {showApprovalMenu && (
+              <div className="absolute right-0 mt-2 w-[min(92vw,440px)] rounded-[14px] border border-[#E1DCDC] bg-white py-2 shadow-2xl">
+                <div className="border-b border-[#E1DCDC] px-4 py-2.5">
+                  <span className="text-xs font-bold text-[#333333]">Pending Project Updates</span>
+                  <span className="ml-2 rounded-full bg-[#F4E9D2] px-2 py-0.5 text-[10px] font-bold text-[#A78645]">
+                    {pendingApprovals.length}
+                  </span>
+                </div>
+                {approvalError && <p role="alert" className="px-4 pt-2 text-xs text-[#A93232]">{approvalError}</p>}
+                <div className="max-h-[70vh] space-y-2 overflow-y-auto p-2">
+                  {pendingApprovals.map(update => (
+                    <article key={update.id} className="rounded-[10px] border border-[#E1DCDC] p-3">
+                      <div className="flex items-start justify-between gap-2 text-[11px]">
+                        <div className="min-w-0">
+                          <p className="font-bold text-[#333333]">{update.user_name}</p>
+                          <p className="truncate text-[#666666]">{update.project_name} · {update.module_name}</p>
+                        </div>
+                        <time className="whitespace-nowrap text-[10px] text-[#888888]">
+                          {new Date(update.created_at).toLocaleString()}
+                        </time>
+                      </div>
+                      <div className="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-[8px] bg-[#F8F7F7] p-2 text-xs leading-relaxed text-[#333333]">
+                        {update.description_text}
+                      </div>
+                      <div className="mt-2 flex justify-end gap-2">
+                        <button
+                          type="button"
+                          disabled={reviewingUpdateId !== null}
+                          onClick={() => handleReviewUpdate(update.id, 'reject')}
+                          className="rounded-[8px] border border-[#B65F65]/30 bg-[#F5DEDE] px-3 py-1.5 text-[11px] font-bold text-[#A93232] disabled:opacity-60"
+                        >
+                          Reject
+                        </button>
+                        <button
+                          type="button"
+                          disabled={reviewingUpdateId !== null}
+                          onClick={() => handleReviewUpdate(update.id, 'accept')}
+                          className="rounded-[8px] bg-[#2F614E] px-3 py-1.5 text-[11px] font-bold text-white disabled:opacity-60"
+                        >
+                          Accept
+                        </button>
+                      </div>
+                    </article>
                   ))}
                 </div>
               </div>

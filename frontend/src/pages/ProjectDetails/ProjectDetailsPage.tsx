@@ -43,6 +43,8 @@ export const ProjectDetailsPage: React.FC = () => {
 
   // Modals state
   const [activeUpdateModule, setActiveUpdateModule] = useState<ModuleItem | null>(null);
+  const [moduleToDelete, setModuleToDelete] = useState<ModuleItem | null>(null);
+  const [isDeletingModule, setIsDeletingModule] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isCompleteModalOpen, setIsCompleteModalOpen] = useState(false);
   const [isAddModuleModalOpen, setIsAddModuleModalOpen] = useState(false);
@@ -126,6 +128,27 @@ export const ProjectDetailsPage: React.FC = () => {
     }
   };
 
+  const handleDeleteModule = async () => {
+    if (!moduleToDelete) return;
+    setIsDeletingModule(true);
+    try {
+      await api.deleteModule(moduleToDelete.id);
+      if (selectedModule?.id === moduleToDelete.id) {
+        setSelectedModule(null);
+        setPreviewMode('default');
+        setUpdates([]);
+        setImages([]);
+      }
+      toast.success('Module Deleted', `Module '${moduleToDelete.name}' was deleted.`);
+      setModuleToDelete(null);
+      await loadProject();
+    } catch (err: any) {
+      toast.error('Module Deletion Failed', err.message || 'Failed to delete module');
+    } finally {
+      setIsDeletingModule(false);
+    }
+  };
+
   const handleRemoveEmployeeFromProject = async () => {
     if (!project || !empToRemove) return;
     setIsRemovingEmp(true);
@@ -161,6 +184,7 @@ export const ProjectDetailsPage: React.FC = () => {
   const canEdit = user?.role_name !== 'Employee';
   const canShare = ['Developer', 'Director'].includes(user?.role_name || '');
   const canDelete = ['Developer', 'Director'].includes(user?.role_name || '');
+  const canDeleteModule = ['Director', 'Project Manager', 'Manager'].includes(user?.role_name || '');
 
   if (loading) {
     return (
@@ -211,7 +235,7 @@ export const ProjectDetailsPage: React.FC = () => {
               </span>
             </div>
 
-            <p className="text-xs text-[#666666] max-w-2xl leading-relaxed">
+            <p className="h-20 max-w-2xl overflow-y-auto rounded-[8px] border border-[#E1DCDC] bg-[#F8F7F7] p-2 text-xs text-[#666666] leading-relaxed whitespace-pre-wrap">
               {project.description || 'No detailed charter provided.'}
             </p>
 
@@ -366,7 +390,7 @@ export const ProjectDetailsPage: React.FC = () => {
                           {/* Module Name */}
                           <td className="py-3 px-4 font-semibold text-[#333333] max-w-xs">
                             <div className="truncate font-semibold text-xs">{mod.name}</div>
-                            <div className="text-[10px] text-[#888888] truncate max-w-xs">
+                            <div className="h-10 max-w-xs overflow-y-auto text-[10px] leading-4 text-[#888888] whitespace-pre-wrap">
                               {mod.description || 'No initial description'}
                             </div>
                           </td>
@@ -442,14 +466,27 @@ export const ProjectDetailsPage: React.FC = () => {
                             </button>
                           </td>
 
-                          {/* Update Button */}
+                          {/* Module Actions */}
                           <td className="py-3 px-4 text-right whitespace-nowrap">
-                            <button
-                              onClick={() => setActiveUpdateModule(mod)}
-                              className="px-2.5 py-1 rounded-lg bg-[#0A0A0A] text-white hover:bg-[#333333] text-xs font-semibold transition-colors"
-                            >
-                              Post Update
-                            </button>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => setActiveUpdateModule(mod)}
+                                className="px-2.5 py-1 rounded-lg bg-[#0A0A0A] text-white hover:bg-[#333333] text-xs font-semibold transition-colors"
+                              >
+                                Post Update
+                              </button>
+                              {canDeleteModule && (
+                                <button
+                                  type="button"
+                                  onClick={() => setModuleToDelete(mod)}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-[#B65F65]/30 bg-[#F5DEDE] px-2.5 py-1 text-xs font-semibold text-[#A93232] transition-colors hover:bg-[#ebcece]"
+                                  aria-label={`Delete module ${mod.name}`}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  <span>Delete</span>
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -507,12 +544,10 @@ export const ProjectDetailsPage: React.FC = () => {
                   <label className="block text-[11px] font-semibold text-[#888888] uppercase mb-1">
                     Initial Description
                   </label>
-                  <textarea
-                    rows={3}
-                    value={newModuleDesc}
+                  <textarea rows={3} value={newModuleDesc}
                     onChange={e => setNewModuleDesc(e.target.value)}
                     placeholder="Brief description of requirements..."
-                    className="w-full bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] p-3 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] resize-none"
+                    className="h-20 w-full bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] p-3 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] resize-none overflow-y-auto"
                   />
                 </div>
 
@@ -544,6 +579,63 @@ export const ProjectDetailsPage: React.FC = () => {
             project={project}
             onDeleted={() => navigate('/home')}
           />
+        )}
+
+        {moduleToDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+            <section
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="delete-module-title"
+              className="w-full max-w-md overflow-hidden rounded-[16px] border border-[#E1DCDC] bg-white shadow-2xl"
+            >
+              <header className="flex items-center justify-between border-b border-[#E1DCDC] bg-[#F5DEDE]/40 px-5 py-4">
+                <h3 id="delete-module-title" className="flex items-center gap-2 text-sm font-bold text-[#A93232]">
+                  <Trash2 className="h-4 w-4" />
+                  Delete Module
+                </h3>
+                <button
+                  type="button"
+                  disabled={isDeletingModule}
+                  onClick={() => setModuleToDelete(null)}
+                  className="rounded-md p-1 text-[#888888] hover:bg-black/5 hover:text-[#333333] disabled:opacity-50"
+                  aria-label="Close delete module confirmation"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </header>
+              <div className="space-y-4 p-5 text-xs">
+                <p className="leading-relaxed text-[#333333]">
+                  Are you sure you want to delete this module from <strong>{project.title}</strong>?
+                </p>
+                <div className="rounded-[10px] border border-[#E1DCDC] bg-[#F5F3F4] p-3">
+                  <span className="block text-[10px] font-bold uppercase text-[#888888]">Selected module</span>
+                  <span className="mt-1 block break-words font-semibold text-[#0A0A0A]">{moduleToDelete.name}</span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-[#666666]">
+                  Only this module will be archived. Its history and related records will remain preserved.
+                </p>
+                <footer className="flex justify-end gap-2 border-t border-[#E1DCDC] pt-3">
+                  <button
+                    type="button"
+                    disabled={isDeletingModule}
+                    onClick={() => setModuleToDelete(null)}
+                    className="rounded-[8px] border border-[#E1DCDC] px-3.5 py-2 font-semibold text-[#666666] hover:bg-[#F5F3F4] disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isDeletingModule}
+                    onClick={handleDeleteModule}
+                    className="rounded-[8px] bg-[#A93232] px-4 py-2 font-bold text-white hover:bg-[#8B2525] disabled:opacity-50"
+                  >
+                    {isDeletingModule ? 'Deleting…' : 'Confirm Delete'}
+                  </button>
+                </footer>
+              </div>
+            </section>
+          </div>
         )}
 
         {/* Module Update Popup */}

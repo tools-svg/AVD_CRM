@@ -66,7 +66,10 @@ export const ModuleUpdateModal: React.FC<ModuleUpdateModalProps> = ({
       }
 
       await api.postModuleUpdate(module.id, formData);
-      toast.success('Update Submitted', `Telemetry and update posted for module '${module.name}'!`);
+      toast.success(
+        'Update Submitted for Approval',
+        `Update submitted for '${module.name}'. The project creator has been notified to accept or reject.`
+      );
       onUpdateSubmitted();
       onClose();
     } catch (err: any) {
@@ -116,17 +119,17 @@ export const ModuleUpdateModal: React.FC<ModuleUpdateModalProps> = ({
           {/* First Row: Description Input Area on left + Choose File button at end of same row */}
           <div className="flex items-start space-x-2">
             <textarea
-              rows={1}
+              rows={2}
               value={descriptionText}
               onChange={e => setDescriptionText(e.target.value)}
               placeholder="Enter module progress note or description update..."
-              className="flex-1 bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] px-3.5 py-2 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] focus:bg-white resize-y min-h-[38px] max-h-28 leading-relaxed font-medium transition-colors"
+              className="h-16 flex-1 bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] px-3.5 py-2 text-xs text-[#333333] focus:outline-none focus:border-[#0A0A0A] focus:bg-white resize-none overflow-y-auto leading-relaxed font-medium transition-colors"
               required
             />
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="h-[38px] px-3.5 rounded-[10px] bg-[#F5F3F4] hover:bg-[#E8E4E4] border border-[#E1DCDC] text-xs font-semibold text-[#333333] flex items-center space-x-1.5 flex-shrink-0 transition-colors"
+              className="h-11 px-4 rounded-[10px] bg-[#F5F3F4] hover:bg-[#E8E4E4] border border-[#E1DCDC] text-sm font-semibold text-[#333333] flex items-center space-x-1.5 flex-shrink-0 transition-colors"
             >
               <Paperclip className="w-3.5 h-3.5 text-[#666666]" />
               <span>Choose File</span>
@@ -161,7 +164,7 @@ export const ModuleUpdateModal: React.FC<ModuleUpdateModalProps> = ({
               <select
                 value={statusChange}
                 onChange={e => setStatusChange(e.target.value)}
-                className="w-full h-[38px] bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] px-2.5 text-xs font-semibold text-[#333333] focus:outline-none focus:border-[#0A0A0A] cursor-pointer"
+                className="w-full bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] px-2.5 text-xs font-semibold text-[#333333] focus:outline-none focus:border-[#0A0A0A] cursor-pointer"
               >
                 <option value="Not Started">Not Started</option>
                 <option value="In Progress">In Progress</option>
@@ -173,7 +176,7 @@ export const ModuleUpdateModal: React.FC<ModuleUpdateModalProps> = ({
             </div>
 
             {/* Progress % input */}
-            <div className="flex-1 flex items-center space-x-2 bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] px-3 h-[38px]">
+            <div className="flex-1 flex items-center space-x-2 bg-[#F5F3F4] border border-[#E1DCDC] rounded-[10px] px-3">
               <span className="text-[11px] font-semibold text-[#888888] whitespace-nowrap">Progress:</span>
               <input
                 type="range"
@@ -193,7 +196,7 @@ export const ModuleUpdateModal: React.FC<ModuleUpdateModalProps> = ({
             <button
               type="submit"
               disabled={isSubmitting}
-              className="h-[38px] px-5 rounded-[10px] bg-[#0A0A0A] text-white hover:bg-[#333333] text-xs font-bold flex items-center space-x-1.5 flex-shrink-0 shadow-xs transition-colors"
+              className="h-11 px-6 rounded-[10px] bg-[#0A0A0A] text-white hover:bg-[#333333] text-sm font-bold flex items-center space-x-1.5 flex-shrink-0 shadow-xs transition-colors"
             >
               {isSubmitting ? (
                 <>

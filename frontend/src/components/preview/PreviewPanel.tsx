@@ -42,7 +42,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
   };
 
   return (
-    <div className="bg-[#FFFFFF] rounded-2xl border border-[#E1DCDC] shadow-sm flex flex-col h-full min-h-[440px] overflow-hidden">
+    <div className="w-full h-[440px] min-h-0 rounded-2xl border border-[#E1DCDC] bg-[#FFFFFF] shadow-sm flex flex-col overflow-hidden">
       {/* Preview Panel Top Header */}
       <div className="px-4 py-3 border-b border-[#E1DCDC] bg-[#F5F3F4] flex items-center justify-between">
         <div className="flex items-center space-x-2">
@@ -76,7 +76,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
       </div>
 
       {/* Panel Content Body */}
-      <div className="flex-1 p-4 overflow-y-auto">
+      <div className={`min-h-0 flex-1 p-4 ${previewMode === 'default' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
         {/* Mode 1: Description History Preview (Comment Icon clicked) */}
         {previewMode === 'description' && selectedModule && (
           <div className="space-y-3">
@@ -162,7 +162,10 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
 
             <div>
               <span className="text-[10px] font-bold uppercase text-[#888888] tracking-wider">Project Objective</span>
-              <p className="text-xs text-[#444444] leading-relaxed mt-1">
+              <p
+                style={{ height: 160, minHeight: 160, maxHeight: 160, overflowY: 'auto', boxSizing: 'border-box' }}
+                className="mt-1 w-full rounded-[10px] border border-[#E1DCDC] bg-[#F8F7F7] p-3 text-xs text-[#444444] leading-relaxed whitespace-pre-wrap"
+              >
                 {project.description || 'No description provided.'}
               </p>
             </div>

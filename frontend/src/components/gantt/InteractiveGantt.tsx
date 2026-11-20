@@ -4,44 +4,63 @@ import {
   ZoomIn, 
   ZoomOut, 
   ChevronRight, 
-  ChevronDown, 
-  Filter, 
-  X, 
-  User as UserIcon,
-  Clock,
-  ArrowRight
+  ChevronDown
 } from 'lucide-react';
-import { GanttData, GanttModule, GanttProject, User } from '../../types';
+import { GanttData, GanttModule, ProjectItem } from '../../types';
 import { api } from '../../services/api';
 import { STATUS_CONFIG, PRIORITY_CONFIG } from '../../config/theme';
 
 interface GanttProps {
   companyId?: number;
   projectId?: number;
+  employeeId?: number;
+  projects: ProjectItem[];
+  busyProjectId: number | null;
+  onUpdateProject: (project: ProjectItem, changes: Record<string, unknown>) => Promise<void> | void;
+  onModuleUpdated: () => Promise<void> | void;
+  onOpenProject: (projectId: number) => void;
 }
 
 type TimeView = 'Daily' | 'Weekly' | 'Monthly';
 
-export const InteractiveGantt: React.FC<GanttProps> = ({ companyId, projectId }) => {
+export const InteractiveGantt: React.FC<GanttProps> = ({
+  companyId,
+  projectId,
+  employeeId,
+  projects,
+  busyProjectId,
+  onUpdateProject,
+  onModuleUpdated,
+  onOpenProject,
+}) => {
   const [data, setData] = useState<GanttData>({ projects: [], modules: [], dependencies: [] });
-  const [employees, setEmployees] = useState<User[]>([]);
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null);
   const [timeView, setTimeView] = useState<TimeView>('Weekly');
   const [zoomLevel, setZoomLevel] = useState<number>(1);
   const [expandedProjects, setExpandedProjects] = useState<Record<number, boolean>>({});
   const [loading, setLoading] = useState(false);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   // Dragging state
   const [draggingModuleId, setDraggingModuleId] = useState<number | null>(null);
   const [dragStartX, setDragStartX] = useState<number>(0);
   const [initialDates, setInitialDates] = useState<{ start: Date; end: Date } | null>(null);
+  const [projectDrag, setProjectDrag] = useState<{
+    id: number;
+    startX: number;
+    start: Date;
+    end: Date;
+    mode: 'move' | 'resize-start' | 'resize-end';
+  } | null>(null);
+  const [projectDateDrafts, setProjectDateDrafts] = useState<Record<number, { start_date: string; deadline: string }>>({});
+  const [projectProgressDrafts, setProjectProgressDrafts] = useState<Record<number, string>>({});
 
   const containerRef = useRef<HTMLDivElement>(null);
 
   const loadGanttData = async () => {
     setLoading(true);
     try {
-      const res = await api.getGanttData(companyId, projectId, selectedEmployeeId || undefined);
+      const res = await api.getGanttData(companyId, projectId, employeeId);
       setData(res);
       // Auto-expand all projects initially
       const expandMap: Record<number, boolean> = {};
@@ -54,42 +73,52 @@ export const InteractiveGantt: React.FC<GanttProps> = ({ companyId, projectId })
     }
   };
 
-  const loadEmployees = async () => {
-    try {
-      const users = await api.getUsers(companyId);
-      setEmployees(users);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
   useEffect(() => {
     loadGanttData();
-  }, [companyId, projectId, selectedEmployeeId]);
-
-  useEffect(() => {
-    loadEmployees();
-  }, [companyId]);
+  }, [companyId, projectId, employeeId]);
 
   const toggleProjectExpand = (projId: number) => {
     setExpandedProjects(prev => ({ ...prev, [projId]: !prev[projId] }));
   };
 
-  // Determine timeline date bounds
   const now = new Date();
-  const baseStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const totalDays = timeView === 'Daily' ? 30 : timeView === 'Weekly' ? 60 : 120;
+  const visibleProjects = projects.filter(project => {
+    const start = project.start_date ? new Date(project.start_date) : now;
+    const end = project.deadline ? new Date(project.deadline) : start;
+    const afterStart = !dateFrom || end >= new Date(`${dateFrom}T00:00:00`);
+    const beforeEnd = !dateTo || start <= new Date(`${dateTo}T23:59:59`);
+    return afterStart && beforeEnd;
+  });
+  const visibleProjectIds = new Set(visibleProjects.map(project => project.id));
+  const visibleModules = data.modules.filter(module => visibleProjectIds.has(module.project_id));
+
+  // Keep the full set of projects in view while expanding the timeline around their dates.
+  const projectDates = visibleProjects.flatMap(project => [
+    project.start_date ? new Date(project.start_date) : now,
+    project.deadline ? new Date(project.deadline) : now,
+  ]).concat(visibleModules.flatMap(module => [
+    new Date(module.start_date),
+    new Date(module.deadline),
+  ])).filter(date => !Number.isNaN(date.getTime()));
+  const firstProjectDate = projectDates.length ? Math.min(...projectDates.map(date => date.getTime())) : now.getTime();
+  const lastProjectDate = projectDates.length ? Math.max(...projectDates.map(date => date.getTime())) : now.getTime();
+  const baseStart = new Date(Math.min(firstProjectDate, now.getTime()));
+  baseStart.setDate(baseStart.getDate() - 7);
+  baseStart.setHours(0, 0, 0, 0);
+  const rangeEnd = new Date(Math.max(lastProjectDate, now.getTime()));
+  rangeEnd.setDate(rangeEnd.getDate() + 30);
+  rangeEnd.setHours(0, 0, 0, 0);
+  const totalDays = Math.max(60, Math.ceil((rangeEnd.getTime() - baseStart.getTime()) / 86400000));
   const dayWidth = (timeView === 'Daily' ? 48 : timeView === 'Weekly' ? 28 : 16) * zoomLevel;
 
   const timelineDays: Date[] = [];
-  for (let i = -7; i < totalDays; i++) {
+  for (let i = 0; i < totalDays; i++) {
     const d = new Date(baseStart);
     d.setDate(baseStart.getDate() + i);
     timelineDays.push(d);
   }
 
   const startDateMin = timelineDays[0];
-  const endDateMax = timelineDays[timelineDays.length - 1];
 
   // Helper to compute pixel X offset for a given date
   const getXForDate = (date: Date): number => {
@@ -99,6 +128,33 @@ export const InteractiveGantt: React.FC<GanttProps> = ({ companyId, projectId })
   };
 
   const todayX = getXForDate(now);
+
+  const getProjectDates = (project: ProjectItem) => {
+    const draft = projectDateDrafts[project.id];
+    const start = draft?.start_date || project.start_date || now.toISOString();
+    const end = draft?.deadline || project.deadline || start;
+    return { start: new Date(start), end: new Date(end) };
+  };
+  const commitProjectProgress = (project: ProjectItem) => {
+    const value = Number(projectProgressDrafts[project.id] ?? project.progress);
+    setProjectProgressDrafts(previous => {
+      const next = { ...previous };
+      delete next[project.id];
+      return next;
+    });
+    if (value !== project.progress) onUpdateProject(project, { progress: value });
+  };
+  const moduleRowCenters = new Map<number, number>();
+  let rowsHeight = 0;
+  visibleProjects.forEach(project => {
+    rowsHeight += 52;
+    if (expandedProjects[project.id]) {
+      visibleModules.filter(module => module.project_id === project.id).forEach(module => {
+        moduleRowCenters.set(module.id, rowsHeight + 24);
+        rowsHeight += 48;
+      });
+    }
+  });
 
   // Drag and drop handlers for module timeline
   const handleMouseDown = (e: React.MouseEvent, mod: GanttModule) => {
@@ -111,7 +167,48 @@ export const InteractiveGantt: React.FC<GanttProps> = ({ companyId, projectId })
     });
   };
 
+  const handleProjectMouseDown = (
+    event: React.MouseEvent,
+    project: ProjectItem,
+    mode: 'move' | 'resize-start' | 'resize-end'
+  ) => {
+    if (busyProjectId !== null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const dates = getProjectDates(project);
+    setProjectDrag({
+      id: project.id,
+      startX: event.clientX,
+      start: dates.start,
+      end: dates.end,
+      mode,
+    });
+  };
+
   const handleMouseMove = (e: React.MouseEvent) => {
+    if (projectDrag) {
+      const deltaDays = Math.round((e.clientX - projectDrag.startX) / dayWidth);
+      if (deltaDays !== 0) {
+        const start = new Date(projectDrag.start);
+        const end = new Date(projectDrag.end);
+        if (projectDrag.mode === 'move') {
+          start.setDate(start.getDate() + deltaDays);
+          end.setDate(end.getDate() + deltaDays);
+        } else if (projectDrag.mode === 'resize-start') {
+          start.setDate(start.getDate() + deltaDays);
+          if (start >= end) start.setTime(end.getTime() - 86400000);
+        } else {
+          end.setDate(end.getDate() + deltaDays);
+          if (end <= start) end.setTime(start.getTime() + 86400000);
+        }
+        setProjectDateDrafts(previous => ({
+          ...previous,
+          [projectDrag.id]: { start_date: start.toISOString(), deadline: end.toISOString() },
+        }));
+      }
+      return;
+    }
+
     if (!draggingModuleId || !initialDates) return;
     const deltaX = e.clientX - dragStartX;
     const deltaDays = Math.round(deltaX / dayWidth);
@@ -132,17 +229,31 @@ export const InteractiveGantt: React.FC<GanttProps> = ({ companyId, projectId })
   };
 
   const handleMouseUp = async () => {
-    if (!draggingModuleId) return;
-    const currentMod = data.modules.find(m => m.id === draggingModuleId);
-    setDraggingModuleId(null);
-    setInitialDates(null);
+    if (projectDrag) {
+      const currentProject = projects.find(project => project.id === projectDrag.id);
+      const dateDraft = projectDateDrafts[projectDrag.id];
+      setProjectDrag(null);
+      if (currentProject && dateDraft) {
+        await onUpdateProject(currentProject, dateDraft);
+        setProjectDateDrafts(previous => {
+          const next = { ...previous };
+          delete next[projectDrag.id];
+          return next;
+        });
+      }
+    }
 
-    if (currentMod) {
+    if (draggingModuleId) {
+      const currentMod = data.modules.find(m => m.id === draggingModuleId);
+      setDraggingModuleId(null);
+      setInitialDates(null);
+      if (!currentMod) return;
       try {
         await api.updateGanttTimeline(currentMod.id, {
           start_date: currentMod.start_date,
           deadline: currentMod.deadline,
         });
+        await onModuleUpdated();
       } catch (e) {
         console.error('Failed to persist Gantt dates:', e);
         loadGanttData();
@@ -198,59 +309,52 @@ export const InteractiveGantt: React.FC<GanttProps> = ({ companyId, projectId })
           </div>
         </div>
 
-        {/* Employee Filtering Dropdown */}
-        <div className="flex items-center space-x-2">
-          <Filter className="w-3.5 h-3.5 text-[#888888]" />
-          <div className="relative">
-            <select
-              value={selectedEmployeeId || ''}
-              onChange={e => setSelectedEmployeeId(e.target.value ? Number(e.target.value) : null)}
-              className="bg-[#FFFFFF] border border-[#E1DCDC] rounded-lg text-xs py-1.5 pl-2.5 pr-7 text-[#333333] focus:outline-none focus:border-[#0A0A0A] font-medium appearance-none cursor-pointer"
-            >
-              <option value="">All Employees</option>
-              {employees.map(emp => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.full_name} ({emp.role_name})
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="w-3 h-3 text-[#888888] absolute right-2 top-2.5 pointer-events-none" />
-          </div>
-
-          {selectedEmployeeId && (
-            <button
-              onClick={() => setSelectedEmployeeId(null)}
-              className="p-1.5 rounded-lg bg-[#E8E4E4] text-[#666666] hover:bg-[#E1DCDC] text-xs flex items-center space-x-1"
-              title="Clear Filter"
-            >
-              <X className="w-3 h-3" />
-            </button>
-          )}
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-1.5 text-[10px] font-semibold text-[#666666]">
+            From
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={event => setDateFrom(event.target.value)}
+              className="rounded-lg border border-[#E1DCDC] bg-white px-2 py-1.5 text-xs text-[#333333]"
+            />
+          </label>
+          <label className="flex items-center gap-1.5 text-[10px] font-semibold text-[#666666]">
+            To
+            <input
+              type="date"
+              value={dateTo}
+              min={dateFrom || undefined}
+              onChange={event => setDateTo(event.target.value)}
+              className="rounded-lg border border-[#E1DCDC] bg-white px-2 py-1.5 text-xs text-[#333333]"
+            />
+          </label>
         </div>
       </div>
 
       {/* Gantt Split View: Left Task Table, Right Interactive Timeline (Section 7.2: High Text Readability & Row Height) */}
-      <div className="flex overflow-hidden relative">
+      <div className="flex max-h-[70vh] overflow-y-auto relative">
         {/* Left Column: Task & Module Hierarchy (380px width for readability) */}
         <div className="w-96 min-w-[360px] max-w-[400px] border-r border-[#E1DCDC] bg-[#FFFFFF] z-10 shadow-xs flex flex-col">
           {/* Table Header */}
-          <div className="h-13 border-b border-[#E1DCDC] px-4 flex items-center justify-between text-xs font-bold text-[#111827] uppercase bg-[#E8E4E4]">
+          <div className="sticky top-0 z-20 h-[52px] border-b border-[#E1DCDC] px-4 flex items-center justify-between text-xs font-bold text-[#111827] uppercase bg-[#E8E4E4]">
             <span>Work Item & Module</span>
             <span>Assignee / Progress</span>
           </div>
 
           {/* Table Rows */}
-          <div className="overflow-y-auto divide-y divide-[#F0EEEE]">
-            {data.projects.map(proj => {
+          <div className="divide-y divide-[#F0EEEE]">
+            {visibleProjects.map(proj => {
               const isExpanded = !!expandedProjects[proj.id];
-              const pModules = data.modules.filter(m => m.project_id === proj.id);
+              const pModules = visibleModules.filter(m => m.project_id === proj.id);
+              const statusColor = STATUS_CONFIG[proj.status] || STATUS_CONFIG['In Progress'];
 
               return (
                 <React.Fragment key={proj.id}>
                   {/* Project Row */}
                   <div 
                     onClick={() => toggleProjectExpand(proj.id)}
-                    className="h-13 px-3 flex items-center justify-between bg-[#F5F3F4] hover:bg-[#EBE5E5] cursor-pointer transition-colors border-b border-[#E1DCDC]/50"
+                    className="h-[52px] px-3 flex items-center justify-between bg-[#F5F3F4] hover:bg-[#EBE5E5] cursor-pointer transition-colors border-b border-[#E1DCDC]/50"
                   >
                     <div className="flex items-center space-x-2 truncate">
                       {isExpanded ? (
@@ -258,14 +362,43 @@ export const InteractiveGantt: React.FC<GanttProps> = ({ companyId, projectId })
                       ) : (
                         <ChevronRight className="w-4 h-4 text-[#333333] flex-shrink-0" />
                       )}
-                      <span className="font-bold text-xs sm:text-sm text-[#0A0A0A] truncate">
-                        {proj.title}
-                      </span>
+                      <button
+                        type="button"
+                        onClick={event => {
+                          event.stopPropagation();
+                          onOpenProject(proj.id);
+                        }}
+                        className="min-w-0 text-left font-bold text-xs sm:text-sm text-[#0A0A0A] hover:underline"
+                        title={`Open ${proj.title}`}
+                      >
+                        <span className="block truncate">{proj.title}</span>
+                        <span className="block truncate text-[10px] font-medium text-[#777777]">
+                          {proj.lead_name || 'Unassigned'}
+                        </span>
+                      </button>
                     </div>
-                    <div className="flex items-center space-x-2 flex-shrink-0">
-                      <span className="text-xs font-bold text-[#2F614E] bg-[#D9EEE5] px-2 py-0.5 rounded-full">
-                        {proj.progress}%
+                    <div className="flex flex-shrink-0 flex-col items-end gap-1">
+                      <span className="rounded-full px-2 py-0.5 text-[9px] font-bold" style={{ backgroundColor: statusColor.bg, color: statusColor.text }}>
+                        {proj.status}
                       </span>
+                      <label className="flex items-center gap-1" onClick={event => event.stopPropagation()}>
+                        <input
+                          aria-label={`Progress for ${proj.title}`}
+                          type="range"
+                          min="0"
+                          max="100"
+                          step="1"
+                          value={projectProgressDrafts[proj.id] ?? String(Math.round(proj.progress || 0))}
+                          disabled={busyProjectId !== null}
+                          onChange={event => setProjectProgressDrafts(previous => ({ ...previous, [proj.id]: event.target.value }))}
+                          onPointerUp={() => commitProjectProgress(proj)}
+                          onKeyUp={() => commitProjectProgress(proj)}
+                          className="w-16 accent-[#2F614E]"
+                        />
+                        <span className="w-7 text-right text-[10px] font-bold text-[#2F614E]">
+                          {projectProgressDrafts[proj.id] ?? Math.round(proj.progress)}%
+                        </span>
+                      </label>
                     </div>
                   </div>
 
@@ -296,9 +429,9 @@ export const InteractiveGantt: React.FC<GanttProps> = ({ companyId, projectId })
               );
             })}
 
-            {data.projects.length === 0 && (
+            {visibleProjects.length === 0 && (
               <div className="p-8 text-center text-xs font-medium text-[#666666]">
-                No projects or modules match current filter.
+                {loading ? 'Loading project timelines…' : 'No project timelines match the current filters.'}
               </div>
             )}
           </div>
@@ -308,7 +441,7 @@ export const InteractiveGantt: React.FC<GanttProps> = ({ companyId, projectId })
         <div ref={containerRef} className="flex-1 overflow-x-auto relative select-none bg-[#FFFFFF]">
           <div style={{ width: timelineDays.length * dayWidth }} className="relative min-h-[300px]">
             {/* Timeline Days Header */}
-            <div className="h-13 border-b border-[#E1DCDC] flex bg-[#E8E4E4] sticky top-0 z-10">
+            <div className="h-[52px] border-b border-[#E1DCDC] flex bg-[#E8E4E4] sticky top-0 z-10">
               {timelineDays.map((d, idx) => {
                 const isToday = d.toDateString() === now.toDateString();
                 const isWeekend = d.getDay() === 0 || d.getDay() === 6;
@@ -324,8 +457,12 @@ export const InteractiveGantt: React.FC<GanttProps> = ({ companyId, projectId })
                           : 'text-[#1F2937] font-medium'
                     }`}
                   >
-                    <span className="text-[10px] uppercase font-bold text-[#4B5563]">{d.toLocaleDateString([], { weekday: 'narrow' })}</span>
-                    <span className="text-xs font-semibold">{d.getDate()}</span>
+                    <span className="text-[10px] uppercase font-bold text-[#4B5563]">
+                      {timeView === 'Daily' || d.getDay() === 1 ? d.toLocaleDateString([], { weekday: 'narrow' }) : ''}
+                    </span>
+                    <span className="text-xs font-semibold">
+                      {timeView === 'Monthly' ? (d.getDate() === 1 ? d.toLocaleDateString([], { month: 'short' }) : '') : timeView === 'Weekly' ? (d.getDay() === 1 ? d.getDate() : '') : d.getDate()}
+                    </span>
                   </div>
                 );
               })}
@@ -359,24 +496,102 @@ export const InteractiveGantt: React.FC<GanttProps> = ({ companyId, projectId })
 
             {/* Timeline Task Bars */}
             <div className="py-0 relative z-10">
-              {data.projects.map(proj => {
+              {data.dependencies.length > 0 && (
+                <svg
+                  className="pointer-events-none absolute left-0 top-0 z-0 overflow-visible"
+                  width={timelineDays.length * dayWidth}
+                  height={rowsHeight}
+                  aria-hidden="true"
+                >
+                  <defs>
+                    <marker id="gantt-dependency-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+                      <path d="M0,0 L7,3.5 L0,7 z" fill="#777777" />
+                    </marker>
+                  </defs>
+                  {data.dependencies.map(dependency => {
+                    const fromY = moduleRowCenters.get(dependency.predecessor_id);
+                    const toY = moduleRowCenters.get(dependency.successor_id);
+                    const predecessor = visibleModules.find(module => module.id === dependency.predecessor_id);
+                    const successor = visibleModules.find(module => module.id === dependency.successor_id);
+                    if (fromY === undefined || toY === undefined || !predecessor || !successor) return null;
+                    const fromX = getXForDate(new Date(predecessor.deadline));
+                    const toX = getXForDate(new Date(successor.start_date));
+                    const bendX = Math.max(fromX + 12, (fromX + toX) / 2);
+                    return (
+                      <path
+                        key={dependency.id}
+                        d={`M ${fromX} ${fromY} H ${bendX} V ${toY} H ${toX}`}
+                        fill="none"
+                        stroke="#777777"
+                        strokeWidth="1.5"
+                        markerEnd="url(#gantt-dependency-arrow)"
+                      />
+                    );
+                  })}
+                </svg>
+              )}
+              {visibleProjects.map(proj => {
                 const isExpanded = !!expandedProjects[proj.id];
-                const pModules = data.modules.filter(m => m.project_id === proj.id);
-
-                const projStartX = getXForDate(new Date(proj.start_date));
-                const projEndX = getXForDate(new Date(proj.deadline));
+                const pModules = visibleModules.filter(m => m.project_id === proj.id);
+                const dates = getProjectDates(proj);
+                const projStartX = getXForDate(dates.start);
+                const projEndX = getXForDate(dates.end);
                 const projBarWidth = Math.max(dayWidth, projEndX - projStartX);
 
                 return (
                   <React.Fragment key={proj.id}>
                     {/* Project Milestone Summary Bar */}
-                    <div className="h-13 flex items-center relative border-b border-transparent">
+                    <div className="h-[52px] flex items-center relative border-b border-transparent">
                       <div
-                        style={{ left: projStartX, width: projBarWidth }}
-                        className="absolute h-8 rounded-[8px] bg-[#0A0A0A] text-white px-3 flex items-center justify-between text-xs font-bold shadow-xs overflow-hidden"
+                        onMouseDown={event => handleProjectMouseDown(event, proj, 'move')}
+                        className={`group absolute flex h-8 cursor-move items-center justify-between overflow-hidden rounded-[8px] border px-3 text-xs font-bold shadow-xs select-none ${
+                          projectDrag?.id === proj.id ? 'z-30 ring-2 ring-[#0A0A0A] shadow-md' : 'hover:shadow-sm'
+                        }`}
+                        style={{
+                          left: projStartX,
+                          width: projBarWidth,
+                          backgroundColor: STATUS_CONFIG[proj.status]?.bg || '#E8E4E4',
+                          borderColor: STATUS_CONFIG[proj.status]?.text || '#333333',
+                          color: STATUS_CONFIG[proj.status]?.text || '#333333',
+                        }}
+                        title={`${proj.title}: drag to move; drag either edge to resize`}
                       >
-                        <span className="truncate mr-2">{proj.title}</span>
-                        <span className="text-xs text-white/90 font-semibold">{proj.progress}%</span>
+                        <div
+                          style={{ width: `${Math.min(100, Math.max(0, proj.progress))}%` }}
+                          className="absolute inset-y-0 left-0 bg-black/10 pointer-events-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={event => {
+                            event.stopPropagation();
+                            onOpenProject(proj.id);
+                          }}
+                          onMouseDown={event => event.stopPropagation()}
+                          className="relative z-10 truncate text-left hover:underline"
+                        >
+                          {proj.title}
+                        </button>
+                        <span
+                          className="relative z-10 ml-2 flex-shrink-0 rounded bg-white/70 px-1 text-[9px] font-bold"
+                          style={{
+                            backgroundColor: PRIORITY_CONFIG[proj.priority]?.bg,
+                            color: PRIORITY_CONFIG[proj.priority]?.text,
+                          }}
+                        >
+                          {proj.priority} · {proj.progress}%
+                        </span>
+                        <button
+                          type="button"
+                          aria-label={`Resize start date for ${proj.title}`}
+                          onMouseDown={event => handleProjectMouseDown(event, proj, 'resize-start')}
+                          className="absolute inset-y-0 left-0 z-20 w-2 cursor-ew-resize bg-black/10 opacity-0 group-hover:opacity-100"
+                        />
+                        <button
+                          type="button"
+                          aria-label={`Resize due date for ${proj.title}`}
+                          onMouseDown={event => handleProjectMouseDown(event, proj, 'resize-end')}
+                          className="absolute inset-y-0 right-0 z-20 w-2 cursor-ew-resize bg-black/10 opacity-0 group-hover:opacity-100"
+                        />
                       </div>
                     </div>
 

@@ -68,7 +68,8 @@ DEFAULT_CONFIGS: Dict[str, Dict[str, Any]] = {
         "defaultView": "Weekly",
         "enableDragDrop": True,
         "showTodayMarker": True
-    }
+    },
+    "direct_edits": {}
 }
 
 @router.get("/snapshots/list", response_model=List[UIVersionSnapshotOut], dependencies=[Depends(require_roles(["Developer"]))])
@@ -147,7 +148,24 @@ def get_role_ui_config(
         UIConfiguration.is_active == True
     ).all()
 
-    result = {k: dict(v) for k, v in DEFAULT_CONFIGS.items()}
+    result = {k: dict(v) if isinstance(v, dict) else v for k, v in DEFAULT_CONFIGS.items()}
+
+    # If querying for a specific role other than Developer, layer Developer configs first as global defaults
+    if role != "Developer":
+        dev_configs = db.query(UIConfiguration).filter(
+            UIConfiguration.role == "Developer",
+            UIConfiguration.is_active == True
+        ).all()
+        for cfg in dev_configs:
+            try:
+                val = json.loads(cfg.config_json)
+                if isinstance(val, dict) and cfg.component_key in result and isinstance(result[cfg.component_key], dict):
+                    result[cfg.component_key] = {**result[cfg.component_key], **val}
+                else:
+                    result[cfg.component_key] = val
+            except Exception:
+                pass
+
     for cfg in saved_configs:
         try:
             val = json.loads(cfg.config_json)

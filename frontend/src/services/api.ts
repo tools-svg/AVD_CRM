@@ -156,10 +156,14 @@ export const api = {
     return handleResponse<ProjectItem>(res);
   },
 
-  async addEmployeeToProject(projectId: number, userId: number) {
+  async addEmployeeToProject(projectId: number, userId: number, moduleIds?: number[]) {
     const res = await fetch(`${API_BASE}/projects/${projectId}/employees/${userId}`, {
       method: 'POST',
-      headers: { ...getAuthHeader() },
+      headers: { 
+        'Content-Type': 'application/json',
+        ...getAuthHeader() 
+      },
+      body: JSON.stringify({ module_ids: moduleIds || [] }),
     });
     return handleResponse<ProjectItem>(res);
   },
@@ -286,6 +290,22 @@ export const api = {
 
   async getModuleUpdates(moduleId: number) {
     const res = await fetch(`${API_BASE}/modules/${moduleId}/updates`, {
+      headers: { ...getAuthHeader() },
+    });
+    return handleResponse<ModuleUpdateRecord[]>(res);
+  },
+
+  async reviewModuleUpdate(updateId: number, action: 'accept' | 'reject', reason?: string) {
+    const res = await fetch(`${API_BASE}/modules/updates/${updateId}/review`, {
+      method: 'POST',
+      headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, reason }),
+    });
+    return handleResponse<{ message: string; update_id: number; approval_status: string }>(res);
+  },
+
+  async getPendingModuleUpdates() {
+    const res = await fetch(`${API_BASE}/modules/updates/pending`, {
       headers: { ...getAuthHeader() },
     });
     return handleResponse<ModuleUpdateRecord[]>(res);
